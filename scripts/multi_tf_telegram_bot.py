@@ -331,6 +331,8 @@ def main():
     while True:
         try:
             now = datetime.now(timezone.utc)
+            if now.minute % 5 == 0 and now.second < 30:
+                print(f"✅ Bot alive - {now.strftime('%H:%M')} - Positions: {len(positions)}")
             
             # === EXIT CHECK ===
             to_remove = []
@@ -453,7 +455,9 @@ def main():
             send_telegram("🛑 Bot đã dừng.")
             break
         except Exception as e:
-            print(f"⚠️ {e}")
+            print(f"⚠️ ERROR: {e}")
+            import traceback
+            traceback.print_exc()
             time.sleep(30)
 
 if __name__ == "__main__":
