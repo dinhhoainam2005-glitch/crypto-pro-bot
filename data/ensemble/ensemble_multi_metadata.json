@@ -1,0 +1,103 @@
+{
+  "version": "multi_v1.0",
+  "coins": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "ARBUSDT",
+    "LINKUSDT",
+    "AVAXUSDT",
+    "DOGEUSDT"
+  ],
+  "total_signals": 405,
+  "signals_per_year": 58,
+  "avg_sharpe": 17.87,
+  "avg_oos_sharpe": 28.11,
+  "positive_coins": "9/9",
+  "coin_stats": {
+    "BTCUSDT": {
+      "n": 36,
+      "long_n": "36",
+      "short_n": "0",
+      "avg_ret": 1.926,
+      "wr": 77.8,
+      "sharpe": 18.34,
+      "oos_sh": 35.36
+    },
+    "ETHUSDT": {
+      "n": 34,
+      "long_n": "34",
+      "short_n": "0",
+      "avg_ret": 1.401,
+      "wr": 64.7,
+      "sharpe": 12.55,
+      "oos_sh": 28.67
+    },
+    "SOLUSDT": {
+      "n": 24,
+      "long_n": "24",
+      "short_n": "0",
+      "avg_ret": 2.88,
+      "wr": 62.5,
+      "sharpe": 15.36,
+      "oos_sh": 18.3
+    },
+    "BNBUSDT": {
+      "n": 128,
+      "long_n": "107",
+      "short_n": "21",
+      "avg_ret": 1.369,
+      "wr": 84.4,
+      "sharpe": 22.99,
+      "oos_sh": 26.15
+    },
+    "XRPUSDT": {
+      "n": 68,
+      "long_n": "67",
+      "short_n": "1",
+      "avg_ret": 1.455,
+      "wr": 86.8,
+      "sharpe": 24.11,
+      "oos_sh": 25.73
+    },
+    "ARBUSDT": {
+      "n": 26,
+      "long_n": "25",
+      "short_n": "1",
+      "avg_ret": 2.658,
+      "wr": 76.9,
+      "sharpe": 15.83,
+      "oos_sh": 21.56
+    },
+    "LINKUSDT": {
+      "n": 28,
+      "long_n": "0",
+      "short_n": "28",
+      "avg_ret": 1.179,
+      "wr": 64.3,
+      "sharpe": 11.2,
+      "oos_sh": 37.56
+    },
+    "AVAXUSDT": {
+      "n": 33,
+      "long_n": "0",
+      "short_n": "33",
+      "avg_ret": 2.241,
+      "wr": 90.9,
+      "sharpe": 33.25,
+      "oos_sh": 41.38
+    },
+    "DOGEUSDT": {
+      "n": 28,
+      "long_n": "28",
+      "short_n": "0",
+      "avg_ret": 1.879,
+      "wr": 75.0,
+      "sharpe": 7.22,
+      "oos_sh": 18.31
+    }
+  },
+  "timestamp": "2026-06-17T15:44:04.418681"
+}

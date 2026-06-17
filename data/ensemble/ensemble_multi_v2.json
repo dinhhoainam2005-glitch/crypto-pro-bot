@@ -1,0 +1,115 @@
+{
+  "version": "multi_v2",
+  "threshold": 1,
+  "total_signals": 1929,
+  "signals_per_year": 276,
+  "signals_per_day": 0.75,
+  "long_short_ratio": "909/1020",
+  "avg_sharpe": 14.63,
+  "avg_oos_sharpe": 23.05,
+  "positive_coins": "10/10",
+  "total_equity_pct": 3090.4,
+  "coin_stats": {
+    "BTCUSDT": {
+      "n": 36,
+      "long_n": "36",
+      "short_n": "0",
+      "avg_ret": 1.926,
+      "wr": 77.8,
+      "sharpe": 18.34,
+      "oos_sh": 35.36,
+      "eq": 69.3
+    },
+    "ETHUSDT": {
+      "n": 66,
+      "long_n": "66",
+      "short_n": "0",
+      "avg_ret": 1.39,
+      "wr": 69.7,
+      "sharpe": 14.18,
+      "oos_sh": 28.16,
+      "eq": 91.8
+    },
+    "SOLUSDT": {
+      "n": 135,
+      "long_n": "66",
+      "short_n": "69",
+      "avg_ret": 1.763,
+      "wr": 69.6,
+      "sharpe": 10.28,
+      "oos_sh": 18.83,
+      "eq": 238.0
+    },
+    "BNBUSDT": {
+      "n": 219,
+      "long_n": "180",
+      "short_n": "39",
+      "avg_ret": 1.09,
+      "wr": 78.1,
+      "sharpe": 18.21,
+      "oos_sh": 20.22,
+      "eq": 238.6
+    },
+    "XRPUSDT": {
+      "n": 342,
+      "long_n": "94",
+      "short_n": "248",
+      "avg_ret": 0.901,
+      "wr": 64.6,
+      "sharpe": 8.13,
+      "oos_sh": 17.27,
+      "eq": 308.2
+    },
+    "ARBUSDT": {
+      "n": 425,
+      "long_n": "131",
+      "short_n": "294",
+      "avg_ret": 1.947,
+      "wr": 70.6,
+      "sharpe": 14.38,
+      "oos_sh": 15.42,
+      "eq": 827.6
+    },
+    "OPUSDT": {
+      "n": 180,
+      "long_n": "76",
+      "short_n": "104",
+      "avg_ret": 2.321,
+      "wr": 77.8,
+      "sharpe": 20.76,
+      "oos_sh": 23.15,
+      "eq": 417.8
+    },
+    "LINKUSDT": {
+      "n": 77,
+      "long_n": "24",
+      "short_n": "53",
+      "avg_ret": 2.368,
+      "wr": 76.6,
+      "sharpe": 18.87,
+      "oos_sh": 35.55,
+      "eq": 182.4
+    },
+    "AVAXUSDT": {
+      "n": 89,
+      "long_n": "26",
+      "short_n": "63",
+      "avg_ret": 2.027,
+      "wr": 79.8,
+      "sharpe": 15.99,
+      "oos_sh": 25.97,
+      "eq": 180.4
+    },
+    "DOGEUSDT": {
+      "n": 360,
+      "long_n": "210",
+      "short_n": "150",
+      "avg_ret": 1.49,
+      "wr": 61.7,
+      "sharpe": 7.15,
+      "oos_sh": 10.6,
+      "eq": 536.3
+    }
+  },
+  "timestamp": "2026-06-17T15:50:28.543345"
+}
