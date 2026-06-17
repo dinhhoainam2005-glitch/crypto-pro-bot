@@ -1,0 +1,19 @@
+{
+  "version": "v3.0",
+  "features": [
+    "Fixed SL 2 ATR",
+    "Vol Sizing nh\u1eb9 (0.75-1.15)",
+    "Kelly + DD Control"
+  ],
+  "initial_capital": 10000,
+  "final_capital": 13832.05,
+  "total_return_pct": 38.32,
+  "max_drawdown_pct": -20.75,
+  "total_trades": 754,
+  "win_rate_pct": 52.0,
+  "profit_factor": 1.16,
+  "sharpe": 1.91,
+  "avg_size_pct": 23.1,
+  "stop_loss_hit": 225,
+  "timestamp": "2026-06-17T12:22:20.500351"
+}

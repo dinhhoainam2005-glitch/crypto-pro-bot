@@ -1,0 +1,50 @@
+{
+  "edge_id": "EDGE-004",
+  "name": "Funding < P1 (Short Squeeze)",
+  "logic": "Khi funding rate xu\u1ed1ng d\u01b0\u1edbi P1 (th\u1ecb tr\u01b0\u1eddng c\u1ef1c k\u1ef3 bearish), short b\u1ecb squeeze \u0111\u1ea9y gi\u00e1 l\u00ean. \u0110\u00e2y l\u00e0 edge MOMENTUM/CONTINUATION.",
+  "signal_type": "Momentum",
+  "direction": "LONG only",
+  "best_horizon_h": 1,
+  "total_signals": 650,
+  "avg_return_pct": 0.099,
+  "win_rate_pct": 49.5,
+  "sharpe": 5.97,
+  "oos_sharpe": 1.45,
+  "wf_profitable": "3/6",
+  "mc_sharpe_above_1_pct": 92.0,
+  "top5_contrib_pct": 199.3,
+  "regime_performance": {
+    "uptrend": {
+      "count": 111,
+      "avg_ret": 0.089,
+      "wr": 46.8,
+      "sharpe": 11.73
+    },
+    "downtrend": {
+      "count": 115,
+      "avg_ret": -0.086,
+      "wr": 45.2,
+      "sharpe": -9.93
+    },
+    "sideway": {
+      "count": 139,
+      "avg_ret": -0.011,
+      "wr": 48.9,
+      "sharpe": -1.06
+    },
+    "high_vol": {
+      "count": 205,
+      "avg_ret": 0.259,
+      "wr": 50.2,
+      "sharpe": 9.63
+    },
+    "low_vol": {
+      "count": 80,
+      "avg_ret": 0.163,
+      "wr": 58.8,
+      "sharpe": 26.27
+    }
+  },
+  "status": "UNDER_REVIEW",
+  "timestamp": "2026-06-17T11:24:40.854221"
+}

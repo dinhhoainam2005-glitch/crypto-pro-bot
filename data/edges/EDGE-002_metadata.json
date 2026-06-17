@@ -1,0 +1,12 @@
+{
+  "edge_id": "EDGE-002",
+  "name": "OI Divergence",
+  "logic": "Gi\u00e1 v\u00e0 OI ph\u00e2n k\u1ef3 b\u00e1o hi\u1ec7u \u0111\u1ea3o chi\u1ec1u. MM gi\u1ea3m inventory khi gi\u00e1 \u0111i ng\u01b0\u1ee3c d\u00f2ng ti\u1ec1n th\u1eadt.",
+  "status": "DEPRECATED",
+  "total_signals": 1889,
+  "oos_sharpe": -1.18,
+  "top5_contrib_pct": -342.8,
+  "wf_profitable": "1/6",
+  "timestamp": "2026-06-17T10:59:30.097440",
+  "deprecation_reason": "Return 24h TB: -0.11%, Sharpe: -0.62, OOS Sharpe: -1.18, WR: 50.9% (random). OI Divergence \u0111\u01a1n thu\u1ea7n kh\u00f4ng ph\u1ea3i l\u00e0 edge."
+}

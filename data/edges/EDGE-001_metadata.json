@@ -1,0 +1,80 @@
+{
+  "edge_id": "EDGE-001",
+  "version": "v2",
+  "name": "Funding Rate Extreme Reversion",
+  "logic": "Khi funding rate v\u01b0\u1ee3t ng\u01b0\u1ee1ng tuy\u1ec7t \u0111\u1ed1i (SHORT>0.05%, LONG<-0.01%), gi\u00e1 c\u00f3 xu h\u01b0\u1edbng \u0111\u1ea3o chi\u1ec1u do \u00e1p l\u1ef1c t\u00e1i c\u00e2n b\u1eb1ng v\u1ecb th\u1ebf",
+  "signal_type": "Mean Reversion",
+  "horizon": "24h",
+  "short_threshold": 0.0005,
+  "long_threshold": -0.0001,
+  "total_signals": 292,
+  "long_signals": 109,
+  "short_signals": 183,
+  "final_equity_pct": 230.6,
+  "max_drawdown_pct": -58.14,
+  "regime_performance": {
+    "uptrend": {
+      "count": 67,
+      "avg_return_pct": 0.128,
+      "win_rate_pct": 53.7,
+      "sharpe": 0.73
+    },
+    "downtrend": {
+      "count": 28,
+      "avg_return_pct": 1.805,
+      "win_rate_pct": 64.3,
+      "sharpe": 6.02
+    },
+    "sideway": {
+      "count": 58,
+      "avg_return_pct": 1.319,
+      "win_rate_pct": 55.2,
+      "sharpe": 4.34
+    },
+    "high_vol": {
+      "count": 92,
+      "avg_return_pct": 0.34,
+      "win_rate_pct": 56.5,
+      "sharpe": 1.27
+    },
+    "low_vol": {
+      "count": 47,
+      "avg_return_pct": 1.356,
+      "win_rate_pct": 51.1,
+      "sharpe": 4.87
+    }
+  },
+  "timestamp": "2026-06-17T10:52:47.095924",
+  "status": "DEPRECATED",
+  "deprecation_reason": "Walk-Forward: 5/12 folds profitable. OOS 2024-2026: Sharpe -1.36 (edge ch\u1ebft ho\u00e0n to\u00e0n ngo\u00e0i m\u1eabu). Top 5% trades \u0111\u00f3ng g\u00f3p 90% l\u1ee3i nhu\u1eadn - ph\u1ee5 thu\u1ed9c v\u00e0i trade may m\u1eafn. Stress test th\u1ea5t b\u1ea1i trong COVID (-1.1%) v\u00e0 FTX (-4.2%).",
+  "robustness_summary": {
+    "edge_id": "EDGE-001",
+    "timestamp": "2026-06-17T10:55:44.969744",
+    "walk_forward": {
+      "profitable_folds": "5/12",
+      "pass": "False"
+    },
+    "monte_carlo": {
+      "n_runs": 1000,
+      "sharpe_above_1_pct": 92.7,
+      "sharpe_95_ci": [
+        0.31,
+        5.85
+      ],
+      "pass": "True"
+    },
+    "out_of_sample": {
+      "is_sharpe": 3.28,
+      "oos_sharpe": -1.36,
+      "oos_trades": 27,
+      "pass": "False"
+    },
+    "distribution": {
+      "skewness": 0.78,
+      "kurtosis": 4.71,
+      "top5_contribution_pct": 90.0,
+      "pass": "False"
+    },
+    "overall_pass": false
+  }
+}

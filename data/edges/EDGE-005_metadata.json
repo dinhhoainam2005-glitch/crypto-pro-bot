@@ -1,0 +1,57 @@
+{
+  "edge_id": "EDGE-005",
+  "name": "MM Absorption (FUND_P5 + FUND_POS + CVD_DROP)",
+  "logic": "Funding th\u1ea5p v\u1eeba ph\u1ea3i (P5) nh\u01b0ng v\u1eabn d\u01b0\u01a1ng + CVD \u0111ang gi\u1ea3m = Market Maker \u0111ang h\u1ea5p th\u1ee5 l\u1ef1c b\u00e1n, chu\u1ea9n b\u1ecb \u0111\u1ea9y gi\u00e1 l\u00ean. V\u00e0o LONG.",
+  "signal_type": "Market Maker Absorption",
+  "direction": "LONG only",
+  "conditions": [
+    "FUND_P5",
+    "FUND_POS",
+    "CVD_DROP"
+  ],
+  "best_horizon_h": 12,
+  "total_signals": 421,
+  "avg_return_pct": 0.464,
+  "win_rate_pct": 61.0,
+  "sharpe": 5.8,
+  "oos_sharpe": 6.14,
+  "wf_profitable": "5/6",
+  "mc_sharpe_above_1_pct": 98.7,
+  "top5_contrib_pct": 55.8,
+  "max_drawdown_pct": -50.53,
+  "cumulative_return_pct": 195.17,
+  "regime_performance": {
+    "uptrend": {
+      "count": 21,
+      "avg_ret": 1.162,
+      "wr": 76.2,
+      "sharpe": 15.6
+    },
+    "downtrend": {
+      "count": 169,
+      "avg_ret": 0.42,
+      "wr": 62.7,
+      "sharpe": 6.15
+    },
+    "sideway": {
+      "count": 66,
+      "avg_ret": 0.26,
+      "wr": 51.5,
+      "sharpe": 5.41
+    },
+    "high_vol": {
+      "count": 90,
+      "avg_ret": 0.945,
+      "wr": 66.7,
+      "sharpe": 7.61
+    },
+    "low_vol": {
+      "count": 75,
+      "avg_ret": -0.032,
+      "wr": 54.7,
+      "sharpe": -0.63
+    }
+  },
+  "status": "UNDER_REVIEW",
+  "timestamp": "2026-06-17T11:37:00.925417"
+}

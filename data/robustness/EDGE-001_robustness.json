@@ -1,0 +1,30 @@
+{
+  "edge_id": "EDGE-001",
+  "timestamp": "2026-06-17T10:55:44.969744",
+  "walk_forward": {
+    "profitable_folds": "5/12",
+    "pass": "False"
+  },
+  "monte_carlo": {
+    "n_runs": 1000,
+    "sharpe_above_1_pct": 92.7,
+    "sharpe_95_ci": [
+      0.31,
+      5.85
+    ],
+    "pass": "True"
+  },
+  "out_of_sample": {
+    "is_sharpe": 3.28,
+    "oos_sharpe": -1.36,
+    "oos_trades": 27,
+    "pass": "False"
+  },
+  "distribution": {
+    "skewness": 0.78,
+    "kurtosis": 4.71,
+    "top5_contribution_pct": 90.0,
+    "pass": "False"
+  },
+  "overall_pass": false
+}

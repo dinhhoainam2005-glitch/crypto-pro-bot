@@ -1,0 +1,13 @@
+{
+  "edge_id": "EDGE-004b",
+  "name": "Adaptive Funding P1",
+  "logic": "Funding < P1 \u2192 LONG trong uptrend/high_vol/low_vol, SHORT trong downtrend/sideway. T\u1ef1 th\u00edch nghi theo regime.",
+  "status": "UNDER_REVIEW",
+  "total_signals": 650,
+  "sharpe": 5.98,
+  "oos_sharpe": -3.33,
+  "wf_profitable": "3/6",
+  "mc_sharpe_above_1_pct": 92.8,
+  "top5_contrib_pct": 198.2,
+  "timestamp": "2026-06-17T11:28:44.851520"
+}

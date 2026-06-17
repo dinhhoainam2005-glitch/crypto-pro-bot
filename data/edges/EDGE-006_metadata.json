@@ -1,0 +1,20 @@
+{
+  "edge_id": "EDGE-006",
+  "name": "Volume-Confirmed MM Absorption",
+  "logic": "FUND_P5 + CVD_DROP + VOL_RISING = MM h\u1ea5p th\u1ee5 c\u00f3 d\u00f2ng ti\u1ec1n x\u00e1c nh\u1eadn \u2192 LONG",
+  "conditions": [
+    "FUND_P5",
+    "CVD_DROP",
+    "VOL_RISING"
+  ],
+  "total_signals": 439,
+  "sharpe": 5.54,
+  "oos_sharpe": 2.72,
+  "wf_profitable": "5/6",
+  "mc_sharpe_above_1_pct": 100.0,
+  "top5_contrib_pct": 94.2,
+  "max_drawdown_pct": -32.85,
+  "cumulative_return_pct": 182.68,
+  "status": "UNDER_REVIEW",
+  "timestamp": "2026-06-17T11:41:08.148942"
+}

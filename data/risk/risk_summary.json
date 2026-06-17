@@ -1,0 +1,14 @@
+{
+  "version": "v1.0",
+  "initial_capital": 10000,
+  "final_capital": 15516.25,
+  "total_return_pct": 55.16,
+  "max_drawdown_pct": -35.09,
+  "total_trades": 755,
+  "win_rate_pct": 51.8,
+  "avg_return_per_trade_pct": 0.16,
+  "profit_factor": 1.1,
+  "stop_loss_hit": 219,
+  "dd_stops": 0,
+  "timestamp": "2026-06-17T12:13:50.324834"
+}
