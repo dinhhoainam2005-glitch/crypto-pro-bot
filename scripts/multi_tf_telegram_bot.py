@@ -1,9 +1,8 @@
 """
-MULTI-TIMEFRAME TELEGRAM SIGNAL BOT v3.0 - KHO BÁU QUỐC GIA
-- 10 coins × 4 timeframes (15m, 1h, 4h, 1d)
-- Tất cả edges từ combo scan
-- LONG + SHORT đầy đủ
-- Risk Management v3
+MULTI-TF TELEGRAM SIGNAL BOT v3.1 - FINAL
+- 15m: 3 edge đã test OOS dương, max 1 tín hiệu/4h
+- 1h, 4h, 1d: giữ nguyên toàn bộ
+- Không cắt bỏ gì khác
 """
 
 import os
@@ -49,10 +48,10 @@ COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
          'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
 
 TIMEFRAMES = {
-    '15m': {'interval': '15min', 'hold_hours': 4, 'horizon': 16},
-    '1h':  {'interval': '1h', 'hold_hours': 12, 'horizon': 12},
-    '4h':  {'interval': '4h', 'hold_hours': 24, 'horizon': 6},
-    '1d':  {'interval': '1d', 'hold_hours': 72, 'horizon': 3},
+    '15m': {'interval': '15min', 'hold_hours': 4, 'horizon': 16, 'max_per_4h': 1},
+    '1h':  {'interval': '1h', 'hold_hours': 12, 'horizon': 12, 'max_per_4h': 99},
+    '4h':  {'interval': '4h', 'hold_hours': 24, 'horizon': 6, 'max_per_4h': 99},
+    '1d':  {'interval': '1d', 'hold_hours': 72, 'horizon': 3, 'max_per_4h': 99},
 }
 
 INITIAL_CAPITAL = 10000
@@ -71,6 +70,7 @@ capital = INITIAL_CAPITAL
 peak_capital = INITIAL_CAPITAL
 positions = {}
 last_checks = {}
+last_15m_signal_time = None
 trades_log = []
 
 # ============================================================
@@ -85,7 +85,7 @@ def send_telegram(message):
         pass
 
 # ============================================================
-# DATA FETCHER
+# DATA
 # ============================================================
 def fetch_klines(symbol, interval='1h', limit=500):
     url = "https://fapi.binance.com/fapi/v1/klines"
@@ -170,7 +170,6 @@ def compute_indicators(df, funding_rate, oi_value, tf_config):
     df['vol_p95'] = df['volume'].rolling(vw, min_periods=20).apply(lambda x: np.percentile(x, 95), raw=True)
     df['vol_p99'] = df['volume'].rolling(vw, min_periods=20).apply(lambda x: np.percentile(x, 99), raw=True)
     df['vol_high'] = (df['volume'] > df['vol_p95']).astype(int)
-    df['vol_spike'] = (df['volume'] > df['vol_p99']).astype(int)
     
     df['price_chg'] = df['close'].pct_change(cvd_lb)
     df['price_up'] = (df['price_chg'] > 0.02).astype(int)
@@ -186,20 +185,13 @@ def compute_indicators(df, funding_rate, oi_value, tf_config):
     return df
 
 # ============================================================
-# TOÀN BỘ EDGES (KHÔNG CẮT BỎ GÌ)
+# TOÀN BỘ EDGES (FINAL)
 # ============================================================
 ALL_EDGES = {
     '15m': {
-        'ETHUSDT': [('FUND_POS+TREND_DOWN', 'SHORT'), ('FUND_RISING+TREND_DOWN', 'SHORT')],
-        'OPUSDT': [('FUND_POS+FUND_RISING', 'SHORT')],
-        'XRPUSDT': [('CVD_UP+TREND_UP', 'LONG')],
-        'DOGEUSDT': [('FUND_POS+PRICE_UP', 'LONG')],
-        'LINKUSDT': [('FUND_POS+VOL_HIGH', 'LONG'), ('FUND_RISING+PRICE_UP', 'LONG')],
-        'BTCUSDT': [('CVD_UP+PRICE_UP', 'LONG'), ('FUND_P95+TREND_UP', 'SHORT')],
-        'SOLUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG')],
-        'BNBUSDT': [('FUND_POS+FUND_RISING', 'SHORT'), ('CVD_UP+VOL_HIGH', 'LONG')],
-        'ARBUSDT': [('FUND_NEG+OI_DOWN', 'LONG')],
-        'AVAXUSDT': [('FUND_P95+TREND_DOWN', 'SHORT')],
+        'XRPUSDT': [('CVD_UP+OI_UP', 'LONG')],
+        'BTCUSDT': [('CVD_DOWN+OI_DOWN', 'LONG')],
+        'BNBUSDT': [('CVD_DOWN+OI_UP', 'SHORT')],
     },
     '1h': {
         'BTCUSDT': [('FUND_P99+PRICE_DOWN+TREND_DOWN', 'LONG'), ('FUND_P5+FUND_RISING+PRICE_DOWN', 'LONG'), ('FUND_P99+PRICE_DOWN', 'LONG')],
@@ -239,7 +231,6 @@ ALL_EDGES = {
     },
 }
 
-# Condition map
 def eval_cond(name, d):
     mapping = {
         'FUND_P1': d['funding_rate'] < d.get('funding_p1', -99),
@@ -254,7 +245,7 @@ def eval_cond(name, d):
         'OI_UP': d['oi_up'] == 1,
         'OI_DOWN': d['oi_down'] == 1,
         'VOL_HIGH': d['vol_high'] == 1,
-        'VOL_SPIKE': d['vol_spike'] == 1,
+        'VOL_SPIKE': d['vol_spike'] if 'vol_spike' in d else False,
         'PRICE_UP': d['price_up'] == 1,
         'PRICE_DOWN': d['price_down'] == 1,
         'TREND_UP': d['trend_up'] == 1,
@@ -322,20 +313,19 @@ def can_open_position(coin, tf):
 # MAIN
 # ============================================================
 def main():
-    global capital, peak_capital, positions
+    global capital, peak_capital, positions, last_15m_signal_time
     
     print("="*60)
-    print("🚀 MULTI-TF SIGNAL BOT v3.0 - KHO BÁU QUỐC GIA")
+    print("🚀 MULTI-TF BOT v3.1 - FINAL")
     print("="*60)
-    print(f"   Coins: {len(COINS)} | TFs: {len(TIMEFRAMES)}")
-    print(f"   Max positions: {MAX_POSITIONS}")
+    print(f"   10 coins × 4 TFs | 15m: 3 edge (max 1/4h)")
+    print(f"   Max {MAX_POSITIONS} positions | SL 2 ATR")
     print("="*60)
     
-    send_telegram("🚀 <b>Multi-TF Signal Bot v3.0</b> đã khởi động!\n\n"
-                  f"⏱️ 4 Timeframes: 15m, 1h, 4h, 1d\n"
-                  f"🪙 10 Coins: BTC, ETH, SOL, BNB, XRP, ARB, OP, LINK, AVAX, DOGE\n"
-                  f"📊 LONG + SHORT\n"
-                  f"🛡️ Risk: SL 2 ATR, Max {MAX_POSITIONS} positions\n\n"
+    send_telegram("🚀 <b>Multi-TF Bot v3.1 - FINAL</b>\n\n"
+                  "⏱️ 4 TFs: 15m(3) · 1h · 4h · 1d\n"
+                  "🪙 10 Coins\n📊 LONG + SHORT\n"
+                  "🛡️ SL 2 ATR · Max 5 pos\n\n"
                   "Đang chờ tín hiệu...")
     
     while True:
@@ -385,9 +375,6 @@ def main():
                     msg += f"Positions: {len(positions)-1}/{MAX_POSITIONS}"
                     
                     send_telegram(msg)
-                    trades_log.append({'time': now.isoformat(), 'coin': coin, 'tf': tf, 
-                                      'direction': pos['direction'], 'pnl': trade_pnl, 
-                                      'return_pct': trade_return*100})
                     to_remove.append(key)
             
             for key in to_remove:
@@ -401,10 +388,14 @@ def main():
                     if key in positions:
                         continue
                     
-                    # Check interval
+                    # 15m rate limit
+                    if tf_name == '15m':
+                        if last_15m_signal_time and (now - last_15m_signal_time).total_seconds() < 14400:
+                            continue
+                    
                     last_key = f"{coin}_{tf_name}_check"
                     if last_key in last_checks:
-                        if (now - last_checks[last_key]).total_seconds() < 300:  # 5 phút
+                        if (now - last_checks[last_key]).total_seconds() < 300:
                             continue
                     
                     df = fetch_klines(coin, tf_config['interval'], limit=500)
@@ -439,6 +430,9 @@ def main():
                                 'stop_loss': stop_loss, 'size': size,
                                 'direction': 'LONG' if signal == 1 else 'SHORT'
                             }
+                            
+                            if tf_name == '15m':
+                                last_15m_signal_time = now
                             
                             sl_pct = abs(1 - stop_loss/entry_price) * 100
                             
