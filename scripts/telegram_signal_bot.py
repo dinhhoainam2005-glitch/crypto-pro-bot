@@ -2,6 +2,7 @@
 TELEGRAM SIGNAL BOT v1.0
 - Nhận tín hiệu từ Ensemble Engine
 - Gửi qua Telegram: Entry, SL, Exit, Daily Summary
+- Hỗ trợ cả Render (env vars) và local (.env)
 """
 
 import os
@@ -14,26 +15,31 @@ import requests
 import json
 
 # ============================================================
-# LOAD .env THỦ CÔNG (không dùng dotenv vì cache)
+# LOAD CONFIG: Ưu tiên Render env vars, fallback về file .env
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-env_path = os.path.join(BASE_DIR, '.env')
 
-env_vars = {}
-if os.path.exists(env_path):
-    with open(env_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                key, value = line.split('=', 1)
-                env_vars[key.strip()] = value.strip()
-
-TOKEN = env_vars.get('TELEGRAM_BOT_TOKEN')
-CHAT_ID = env_vars.get('TELEGRAM_CHAT_ID')
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 if not TOKEN or not CHAT_ID:
-    print("❌ Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID trong .env")
+    env_path = os.path.join(BASE_DIR, '.env')
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    if key.strip() == 'TELEGRAM_BOT_TOKEN':
+                        TOKEN = value.strip()
+                    elif key.strip() == 'TELEGRAM_CHAT_ID':
+                        CHAT_ID = value.strip()
+
+if not TOKEN or not CHAT_ID:
+    print("❌ Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID")
     sys.exit(1)
+
+CHAT_ID = str(CHAT_ID)
 
 LOG_DIR = os.path.join(BASE_DIR, "data", "paper_trading")
 os.makedirs(LOG_DIR, exist_ok=True)
