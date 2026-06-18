@@ -13,6 +13,7 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 import requests
 import json
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
 
 # ============================================================
 # CONFIG
@@ -40,7 +41,17 @@ if not TOKEN or not CHAT_ID:
     sys.exit(1)
 
 CHAT_ID = str(CHAT_ID)
-
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
+def send_discord(message):
+    """Gửi tin nhắn qua Discord webhook"""
+    # Discord không hỗ trợ HTML, chuyển sang plain text
+    import re
+    clean_msg = re.sub(r'<[^>]+>', '', message)  # Xóa HTML tags
+    payload = {'content': clean_msg}
+    try:
+        requests.post(DISCORD_WEBHOOK, json=payload, timeout=5)
+    except:
+        pass
 # ============================================================
 # TOÀN BỘ CONFIG
 # ============================================================
@@ -327,6 +338,11 @@ def main():
                   "🪙 10 Coins\n📊 LONG + SHORT\n"
                   "🛡️ SL 2 ATR · Max 5 pos\n\n"
                   "Đang chờ tín hiệu...")
+    send_discord("🚀 Multi-TF Bot v3.1 - FINAL\n\n"
+                  "⏱️ 4 TFs: 15m(3) · 1h · 4h · 1d\n"
+                  "🪙 10 Coins\n📊 LONG + SHORT\n"
+                  "🛡️ SL 2 ATR · Max 5 pos\n\n"
+                  "Đang chờ tín hiệu...")
     
     while True:
         try:
@@ -377,6 +393,7 @@ def main():
                     msg += f"Positions: {len(positions)-1}/{MAX_POSITIONS}"
                     
                     send_telegram(msg)
+                    send_discord(msg)
                     to_remove.append(key)
             
             for key in to_remove:
@@ -447,12 +464,14 @@ def main():
                             msg += f"💼 Positions: {len(positions)}/{MAX_POSITIONS}"
                             
                             send_telegram(msg)
+                            send_discord(msg)
                             print(f"   {dir_str} [{tf_name}] {coin}: ${entry_price:,.4f}")
             
             time.sleep(30)
             
         except KeyboardInterrupt:
             send_telegram("🛑 Bot đã dừng.")
+            send_discord("🛑 Bot đã dừng.")
             break
         except Exception as e:
             print(f"⚠️ ERROR: {e}")
