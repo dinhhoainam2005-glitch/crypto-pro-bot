@@ -41,6 +41,44 @@ if not TOKEN or not CHAT_ID:
     sys.exit(1)
 
 CHAT_ID = str(CHAT_ID)
+
+# ============================================================
+# STATE FILE (giữ positions khi restart)
+# ============================================================
+STATE_FILE = os.path.join(BASE_DIR, "data", "state.json")
+
+def save_state():
+    with open(STATE_FILE, 'w') as f:
+        json.dump({
+            'capital': capital,
+            'peak_capital': peak_capital,
+            'positions': {k: {
+                'coin': v['coin'], 'tf': v['tf'],
+                'entry_price': v['entry_price'],
+                'entry_time': v['entry_time'].isoformat(),
+                'stop_loss': v['stop_loss'],
+                'size': v['size'],
+                'direction': v['direction']
+            } for k, v in positions.items()}
+        }, f)
+
+def load_state():
+    global capital, peak_capital, positions
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE) as f:
+            state = json.load(f)
+            capital = state.get('capital', INITIAL_CAPITAL)
+            peak_capital = state.get('peak_capital', INITIAL_CAPITAL)
+            for k, v in state.get('positions', {}).items():
+                positions[k] = {
+                    'coin': v['coin'], 'tf': v['tf'],
+                    'entry_price': v['entry_price'],
+                    'entry_time': datetime.fromisoformat(v['entry_time']),
+                    'stop_loss': v['stop_loss'],
+                    'size': v['size'],
+                    'direction': v['direction']
+                }
+
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
 def send_discord(message):
     """Gửi tin nhắn qua Discord webhook"""
@@ -325,7 +363,8 @@ def can_open_position(coin, tf):
 # ============================================================
 def main():
     global capital, peak_capital, positions, last_15m_signal_time
-    
+    load_state()
+
     print("="*60)
     print("🚀 MULTI-TF BOT v3.1 - FINAL")
     print("="*60)
@@ -394,6 +433,7 @@ def main():
                     
                     send_telegram(msg)
                     send_discord(msg)
+                    save_state()
                     to_remove.append(key)
             
             for key in to_remove:
@@ -465,6 +505,7 @@ def main():
                             
                             send_telegram(msg)
                             send_discord(msg)
+                            save_state()
                             print(f"   {dir_str} [{tf_name}] {coin}: ${entry_price:,.4f}")
             
             time.sleep(30)
