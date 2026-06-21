@@ -91,13 +91,13 @@ def send_discord(message):
     except:
         pass
 # ============================================================
-# TOÀN BỘ CONFIG
+# TOÀN BỘ CONFIGetch_oi_bybit
 # ============================================================
 COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
          'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
 
 TIMEFRAMES = {
-    '15m': {'interval': '15min', 'hold_hours': 4, 'horizon': 16, 'max_per_4h': 1},
+    '15m': {'interval': '15m', 'hold_hours': 4, 'horizon': 16, 'max_per_4h': 1},
     '1h':  {'interval': '1h', 'hold_hours': 12, 'horizon': 12, 'max_per_4h': 99},
     '4h':  {'interval': '4h', 'hold_hours': 24, 'horizon': 6, 'max_per_4h': 99},
     '1d':  {'interval': '1d', 'hold_hours': 72, 'horizon': 3, 'max_per_4h': 99},
@@ -169,9 +169,12 @@ def fetch_funding_rate(symbol):
         pass
     return 0.0001
 
-def fetch_oi_bybit(symbol):
+def fetch_oi_bybit(symbol, tf='1h'):
+    # Map tf bot → intervalTime Bybit
+    tf_map = {'15m': '15min', '1h': '1h', '4h': '4h', '1d': '1d'}
+    interval = tf_map.get(tf, '1h')
     url = "https://api.bybit.com/v5/market/open-interest"
-    params = {'category': 'linear', 'symbol': symbol, 'intervalTime': '1h', 'limit': 1}
+    params = {'category': 'linear', 'symbol': symbol, 'intervalTime': interval, 'limit': 2}
     try:
         resp = requests.get(url, params=params, timeout=5)
         if resp.status_code == 200:
@@ -189,7 +192,7 @@ def fetch_oi_bybit(symbol):
 # ============================================================
 def compute_indicators(df, funding_rate, oi_value, tf_config):
     df = df.copy()
-    n_per_day = {'15min': 96, '1h': 24, '4h': 6, '1d': 1}[tf_config['interval']]
+    n_per_day = {'15m': 96, '1h': 24, '4h': 6, '1d': 1}[tf_config['interval']]
     
     df['funding_rate'] = funding_rate
     df['oi'] = oi_value
@@ -457,12 +460,14 @@ def main():
                         if (now - last_checks[last_key]).total_seconds() < 300:
                             continue
                     
-                    df = fetch_klines(coin, tf_config['interval'], limit=500)
+                    LIMITS = {'15m': 1500, '1h': 1000, '4h': 1000, '1d': 1000}
+                    limit = LIMITS.get(tf_name, 500)
+                    df = fetch_klines(coin, tf_config['interval'], limit=limit)
                     if df is None:
                         continue
                     
                     funding = fetch_funding_rate(coin)
-                    oi = fetch_oi_bybit(coin)
+                    oi = fetch_oi_bybit(coin, tf_name)
                     df = compute_indicators(df, funding, oi, tf_config)
                     
                     signal, votes = get_signal(df, coin, tf_name)
