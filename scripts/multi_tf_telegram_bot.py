@@ -275,20 +275,12 @@ def fetch_funding_rate(symbol):
         pass
     return 0.0001
 
-def fetch_oi_bybit(symbol, tf='1h'):
-    # Map tf bot → intervalTime Bybit
-    tf_map = {'15m': '15min', '1h': '1h', '4h': '4h', '1d': '1d'}
-    interval = tf_map.get(tf, '1h')
-    url = "https://api.bybit.com/v5/market/open-interest"
-    params = {'category': 'linear', 'symbol': symbol, 'intervalTime': interval, 'limit': 2}
+def fetch_oi(symbol):
+    url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}"
     try:
-        resp = requests.get(url, params=params, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('retCode') == 0:
-                oi_list = data['result'].get('list', [])
-                if oi_list:
-                    return float(oi_list[0]['openInterest'])
+        resp = requests.get(url, timeout=5).json()
+        if 'openInterest' in resp:
+            return float(resp['openInterest'])
     except:
         pass
     return 50000
@@ -471,22 +463,20 @@ def record_oi():
     os.makedirs(OI_RECORD_DIR, exist_ok=True)
     for coin in COINS:
         try:
-            url = f"https://api.bybit.com/v5/market/open-interest?category=linear&symbol={coin}&intervalTime=1h&limit=1"
+            url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={coin}"
             resp = requests.get(url, timeout=5).json()
-            if resp.get('retCode') == 0:
-                oi_list = resp['result']['list']
-                if oi_list:
-                    oi_val = float(oi_list[0]['openInterest'])
-                    ts = pd.to_datetime(oi_list[0]['timestamp'], unit='ms')
-                    file_path = os.path.join(OI_RECORD_DIR, f"{coin}_oi.parquet")
-                    new_row = pd.DataFrame({'oi': [oi_val]}, index=[ts])
-                    if os.path.exists(file_path):
-                        existing = pd.read_parquet(file_path)
-                        existing = pd.concat([existing, new_row])
-                        existing = existing[~existing.index.duplicated(keep='last')]
-                        existing.to_parquet(file_path)
-                    else:
-                        new_row.to_parquet(file_path)
+            if 'openInterest' in resp:
+                oi_val = float(resp['openInterest'])
+                ts = datetime.now(timezone.utc)
+                file_path = os.path.join(OI_RECORD_DIR, f"{coin}_oi.parquet")
+                new_row = pd.DataFrame({'oi': [oi_val]}, index=[ts])
+                if os.path.exists(file_path):
+                    existing = pd.read_parquet(file_path)
+                    existing = pd.concat([existing, new_row])
+                    existing = existing[~existing.index.duplicated(keep='last')]
+                    existing.to_parquet(file_path)
+                else:
+                    new_row.to_parquet(file_path)
         except:
             pass
 def detect_whale_retail():
@@ -506,17 +496,6 @@ def detect_whale_retail():
             cvd_24h = df['cvd'].iloc[-1] - df['cvd'].iloc[-25] if len(df) >= 25 else 0
             whale_buying = cvd_24h > 0
             
-            # OI Bybit
-            url_oi = f"https://api.bybit.com/v5/market/open-interest?category=linear&symbol={coin}&intervalTime=1h&limit=50"
-            resp_oi = requests.get(url_oi, timeout=5)
-            oi_data = resp_oi.json()
-            if oi_data.get('retCode') == 0:
-                oi_list = oi_data['result']['list']
-                oi_values = [float(x['openInterest']) for x in oi_list]
-                oi_chg = (oi_values[0] - oi_values[23]) / oi_values[23] * 100 if len(oi_values) >= 24 else 0
-            else:
-                oi_chg = 0
-            whale_oi_up = oi_chg > 0.5
             
             # Funding
             url_fund = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={coin}&limit=50"
@@ -527,11 +506,11 @@ def detect_whale_retail():
             fund_8h_ago = fund_rates[8] if len(fund_rates) > 8 else current_fund
             retail_buying = current_fund > 0 and current_fund > fund_8h_ago
             
-            whale_score = (1 if whale_buying else 0) + (1 if whale_oi_up else 0)
+            whale_score = (1 if whale_buying else 0)
             retail_score = 1 if retail_buying else 0
             
-            if whale_score >= 2 and retail_score == 0:
-                alerts.append(f"🔵 <b>WHALE ALERT: {coin}</b>\n   Cá voi đang GOM (CVD↑, OI↑), Cá con SỢ (Funding↓)\n   → Khả năng SẮP BƠM")
+            if whale_score >= 1 and retail_score == 0:
+                alerts.append(f"🔵 <b>WHALE ALERT: {coin}</b>\n   Cá voi đang GOM (CVD↑), Cá con SỢ (Funding↓)\n   → Khả năng SẮP BƠM")
             elif whale_score == 0 and retail_score == 1:
                 alerts.append(f"🔴 <b>WHALE ALERT: {coin}</b>\n   Cá voi đang XẢ, Cá con MUA\n   → Khả năng PHÂN PHỐI - SẮP GIẢM")
         
@@ -650,7 +629,7 @@ def main():
                         continue
                     
                     funding = fetch_funding_rate(coin)
-                    oi = fetch_oi_bybit(coin, tf_name)
+                    oi = fetch_oi(coin)
                     df = compute_indicators(df, funding, oi, tf_config)
                     
                     signal, votes = get_signal(df, coin, tf_name)
@@ -805,8 +784,6 @@ CONDITIONS_SCAN = {
     'FUND_RISING': lambda d: d['funding_rising'] == 1,
     'CVD_UP': lambda d: d['cvd_up'] == 1,
     'CVD_DOWN': lambda d: d['cvd_down'] == 1,
-    'OI_UP': lambda d: d['oi_up'] == 1,
-    'OI_DOWN': lambda d: d['oi_down'] == 1,
     'VOL_HIGH': lambda d: d['vol_high'] == 1,
     'VOL_SPIKE': lambda d: d['vol_spike'] == 1,
     'PRICE_UP': lambda d: d['price_up'] == 1,
@@ -862,7 +839,7 @@ def auto_scan_new_edges():
                 continue
             
             funding = fetch_funding_rate(coin)
-            oi = fetch_oi_bybit(coin, '1h')
+            oi = fetch_oi(coin)
             tf_config = TIMEFRAMES['1h']
             df = compute_indicators(df, funding, oi if oi else 50000, tf_config)
             df = df.dropna()
