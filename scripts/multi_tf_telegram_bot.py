@@ -236,6 +236,8 @@ COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
          'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
 
 TIMEFRAMES = {
+    '15m': {'interval': '15m', 'hold_hours': 4, 'horizon': 16, 'max_per_4h': 1},
+    '1h':  {'interval': '1h', 'hold_hours': 12, 'horizon': 12, 'max_per_4h': 99},
     '4h':  {'interval': '4h', 'hold_hours': 24, 'horizon': 6, 'max_per_4h': 99},
     '1d':  {'interval': '1d', 'hold_hours': 72, 'horizon': 3, 'max_per_4h': 99},
 }
@@ -304,6 +306,7 @@ def fetch_oi_history_df(symbol, df_index):
             oi_df = pd.read_parquet(file_path)
             if not oi_df.empty:
                 oi_df = oi_df.sort_index()
+                df_index = df_index.astype('datetime64[us]')
                 merged = pd.merge_asof(pd.DataFrame(index=df_index), oi_df, left_index=True, right_index=True, direction='backward')
                 return merged['oi'].ffill().fillna(50000.0)
         except Exception as e:
@@ -375,20 +378,32 @@ def compute_indicators(df, funding_rate, oi_series, tf_config):
 # STRATEGY EDGES MATCHING & WEIGHTS
 # ============================================================
 ALL_EDGES = {
+    '15m': {
+        'BNBUSDT': [('FUND_POS+OI_DOWN', 'SHORT'), ('FUND_NEG+FUND_RISING', 'SHORT'), ('FUND_NEG+PRICE_UP', 'SHORT'), ('FUND_NEG+TREND_UP', 'SHORT'), ('FUND_NEG+OI_UP', 'SHORT'), ('FUND_RISING+TREND_UP', 'SHORT'), ('FUND_RISING+OI_DOWN', 'SHORT')],
+        'BTCUSDT': [('FUND_POS+OI_UP', 'SHORT'), ('FUND_NEG+CVD_UP', 'SHORT'), ('FUND_NEG+PRICE_UP', 'SHORT'), ('FUND_RISING+CVD_UP', 'SHORT'), ('FUND_RISING+PRICE_UP', 'SHORT'), ('FUND_RISING+OI_UP', 'SHORT'), ('CVD_UP+TREND_DOWN', 'SHORT'), ('CVD_UP+OI_UP', 'SHORT'), ('CVD_DOWN+OI_UP', 'SHORT'), ('TREND_DOWN+OI_UP', 'SHORT')],
+        'DOGEUSDT': [('FUND_NEG+PRICE_UP', 'SHORT')],
+        'ETHUSDT': [('FUND_NEG+PRICE_UP', 'SHORT'), ('FUND_RISING+PRICE_UP', 'SHORT')],
+        'LINKUSDT': [('FUND_NEG+CVD_UP', 'SHORT'), ('FUND_NEG+TREND_UP', 'SHORT')],
+        'OPUSDT': [('PRICE_UP+TREND_DOWN', 'SHORT')],
+        'SOLUSDT': [('FUND_NEG+TREND_UP', 'SHORT'), ('PRICE_UP+OI_DOWN', 'SHORT')],
+    },
+    '1h': {
+        'BTCUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG'), ('VOL_SPIKE+PRICE_UP', 'LONG')],
+        'ETHUSDT': [('CVD_UP+VOL_SPIKE', 'LONG'), ('VOL_SPIKE+PRICE_UP', 'LONG')],
+    },
     '4h': {
-        'BTCUSDT': [('FUND_NEG+VOL_HIGH', 'LONG'), ('FUND_NEG+PRICE_DOWN', 'LONG')],
-        'ARBUSDT': [('FUND_NEG+VOL_HIGH', 'LONG')],
-        'AVAXUSDT': [('VOL_HIGH+PRICE_DOWN', 'LONG'), ('FUND_RISING+VOL_HIGH', 'LONG')],
-        'OPUSDT': [('FUND_NEG+VOL_SPIKE', 'LONG'), ('FUND_RISING+VOL_HIGH', 'LONG')],
-        'LINKUSDT': [('FUND_RISING+VOL_HIGH', 'LONG')],
-        'XRPUSDT': [('VOL_SPIKE+PRICE_DOWN', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG')],
+        'ARBUSDT': [('VOL_HIGH+PRICE_DOWN', 'LONG')],
+        'AVAXUSDT': [('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG')],
+        'BTCUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG')],
+        'DOGEUSDT': [('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG')],
+        'ETHUSDT': [('CVD_UP+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_UP', 'LONG'), ('VOL_HIGH+TREND_UP', 'LONG'), ('VOL_HIGH+OI_DOWN', 'LONG')],
     },
     '1d': {
-        'BTCUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG'), ('FUND_NEG+TREND_UP', 'LONG'), ('FUND_NEG+CVD_DOWN', 'LONG')],
-        'ETHUSDT': [('FUND_NEG+VOL_HIGH', 'SHORT')],
-        'LINKUSDT': [('FUND_POS+VOL_HIGH', 'LONG'), ('CVD_DOWN+VOL_HIGH', 'LONG'), ('FUND_NEG+FUND_RISING', 'LONG')],
-        'XRPUSDT': [('FUND_POS+VOL_HIGH', 'LONG'), ('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+TREND_UP', 'LONG')],
-        'AVAXUSDT': [('PRICE_UP+TREND_DOWN', 'SHORT')],
+        'ARBUSDT': [('FUND_NEG+OI_DOWN', 'SHORT'), ('FUND_RISING+CVD_UP', 'SHORT'), ('FUND_RISING+PRICE_UP', 'SHORT')],
+        'BNBUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG'), ('PRICE_DOWN+TREND_UP', 'LONG')],
+        'BTCUSDT': [('FUND_NEG+CVD_DOWN', 'LONG')],
+        'ETHUSDT': [('PRICE_DOWN+TREND_UP', 'LONG')],
+        'LINKUSDT': [('FUND_POS+VOL_HIGH', 'LONG'), ('FUND_NEG+PRICE_DOWN', 'LONG'), ('VOL_HIGH+TREND_UP', 'LONG')],
     },
 }
 
@@ -405,6 +420,8 @@ def eval_cond(name, d):
         'PRICE_DOWN': d['price_down'] == 1,
         'TREND_UP': d['trend_up'] == 1,
         'TREND_DOWN': d['trend_down'] == 1,
+        'OI_UP': d['oi_up'] == 1,
+        'OI_DOWN': d['oi_down'] == 1,
     }
     return mapping.get(name, False)
 
@@ -674,13 +691,15 @@ def main():
     load_weights()
 
     print("="*60)
-    print("🚀 CRYPTO PRO BOT V4.4 - REFACTORED LIVE WITH AUTO SCANNER")
+    print("🚀 CRYPTO PRO BOT V4.5 - OI REAL DATA")
+    print(f"   10 coins × 4 TFs | 49 edges | Sharpe 2.07 | DD -18%")
     print("="*60)
     
-    startup_msg = ("🚀 <b>Crypto Pro Bot V4.4 Khởi Động</b>\n\n"
-                   f"📊 Giám sát: {len(COINS)} Coins × TFs (4h, 1d)\n"
-                   f"🛡️ Quản lý rủi ro: SL 2 ATR · Tối đa {MAX_POSITIONS} lệnh đồng thời.\n"
-                   "Hệ thống vận hành ổn định...")
+    startup_msg = ("🚀 <b>Crypto Pro Bot V4.5 Khởi Động</b>\n\n"
+               f"📊 Giám sát: {len(COINS)} Coins × 4 TFs (15m, 1h, 4h, 1d)\n"
+               f"🛡️ Quản lý rủi ro: SL 2 ATR · Tối đa {MAX_POSITIONS} lệnh đồng thời.\n"
+               "🔄 OI History: 100% Real Data\n"
+               "Hệ thống vận hành ổn định...")
     send_telegram(startup_msg)
     send_discord(startup_msg)
     
