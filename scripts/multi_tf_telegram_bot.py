@@ -164,7 +164,8 @@ def save_state():
                 'entry_time': v['entry_time'].isoformat(),
                 'stop_loss': v['stop_loss'],
                 'size': v['size'],
-                'direction': v['direction']
+                'direction': v['direction'],
+                'entry_capital': v['entry_capital']
             } for k, v in positions.items()}
         }, f)
 
@@ -182,7 +183,8 @@ def load_state():
                     'entry_time': datetime.fromisoformat(v['entry_time']),
                     'stop_loss': v['stop_loss'],
                     'size': v['size'],
-                    'direction': v['direction']
+                    'direction': v['direction'],
+                    'entry_capital': v['entry_capital']
                 }
 
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
@@ -327,7 +329,14 @@ def compute_indicators(df, funding_rate, oi_value, tf_config):
     df['trend_up'] = (df['close'] > df['ma_50']).astype(int)
     df['trend_down'] = (df['close'] < df['ma_50']).astype(int)
     
-    df['atr_14'] = (df['high'] - df['low']).rolling(14).mean()
+    df['tr'] = np.maximum(
+    df['high'] - df['low'],
+    np.maximum(
+        abs(df['high'] - df['close'].shift(1)),
+        abs(df['low'] - df['close'].shift(1))
+    )
+)
+    df['atr_14'] = df['tr'].rolling(14).mean()
     df['atr_pct'] = df['atr_14'] / df['close'] * 100
     
     return df
@@ -544,7 +553,7 @@ def main():
                     else:
                         trade_return = (pos['entry_price'] - exit_price) / pos['entry_price']
                     
-                    trade_pnl = capital * pos['size'] * trade_return
+                    trade_pnl = pos['entry_capital'] * pos['size'] * trade_return
                     capital += trade_pnl
                     if capital > peak_capital:
                         peak_capital = capital
@@ -621,7 +630,8 @@ def main():
                                 'coin': coin, 'tf': tf_name,
                                 'entry_price': entry_price, 'entry_time': now,
                                 'stop_loss': stop_loss, 'size': size,
-                                'direction': 'LONG' if signal == 1 else 'SHORT'
+                                'direction': 'LONG' if signal == 1 else 'SHORT',
+                                'entry_capital': capital
                             }
                             
                             if tf_name == '15m':
@@ -672,16 +682,15 @@ def main():
                 send_telegram(report)
                 send_discord(report)
         
-        # === AUTO SCANNER (Ngày 1 hàng tháng) ===
+        # === AUTO SCANNER (Ngày 1 hàng tháng) - CHỈ SCAN, KHÔNG TỰ ĐỘNG THÊM ===
         if now.day == 1 and now.hour == 0 and now.minute < 5:
             scan_key = f"scan_{now.month}"
             if scan_key not in last_checks:
                 last_checks[scan_key] = now
                 new_edges = auto_scan_new_edges()
                 if new_edges:
-                    added = add_new_edges(new_edges)
-                    send_telegram(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
-                    send_discord(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
+                    send_telegram(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, chưa thêm (cần duyệt thủ công)")
+                    send_discord(f"🔍 AUTO SCANNER: {len(new_edges)} candidates found")
         # === OI RECORDER (mỗi 1h) ===
         if now.minute < 5:
             oi_key = f"oi_record_{now.hour}"
