@@ -84,7 +84,6 @@ def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
         std = (sum((t - avg)**2 for t in trades) / len(trades)) ** 0.5
         # Dùng số trade/năm thực tế từ dữ liệu
         trades_count = len(trades)
-        days_span = 365  # mặc định
         log[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(trades_count), 2) if std > 1e-8 else 0
         log[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
     
@@ -235,8 +234,6 @@ COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
          'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
 
 TIMEFRAMES = {
-    '15m': {'interval': '15m', 'hold_hours': 4, 'horizon': 16, 'max_per_4h': 1},
-    '1h':  {'interval': '1h', 'hold_hours': 12, 'horizon': 12, 'max_per_4h': 99},
     '4h':  {'interval': '4h', 'hold_hours': 24, 'horizon': 6, 'max_per_4h': 99},
     '1d':  {'interval': '1d', 'hold_hours': 72, 'horizon': 3, 'max_per_4h': 99},
 }
@@ -780,8 +777,6 @@ def main():
                 for alert in whale_alerts:
                     send_telegram(alert)
                     send_discord(alert)
-        
-        time.sleep(30)
             
 
 def fetch_dominance():
