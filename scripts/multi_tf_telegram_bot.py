@@ -43,6 +43,7 @@ def save_weights():
 
 def load_weights():
     global EDGE_WEIGHTS
+    EDGE_WEIGHTS = {}
     if os.path.exists(WEIGHT_FILE):
         with open(WEIGHT_FILE, 'r') as f:
             EDGE_WEIGHTS = json.load(f)
@@ -73,8 +74,10 @@ def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
     if len(trades) >= 10:
         avg = sum(trades) / len(trades)
         std = (sum((t - avg)**2 for t in trades) / len(trades)) ** 0.5
-        tf_annual = {'15m': 365*96, '1h': 365*24, '4h': 365*6, '1d': 365}[tf]
-        log[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(tf_annual), 2) if std > 0 else 0
+        # Dùng số trade/năm thực tế từ dữ liệu
+        trades_count = len(trades)
+        days_span = 365  # mặc định
+        log[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(trades_count), 2) if std > 0 else 0
         log[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
     
     save_edge_log(log)
@@ -168,6 +171,7 @@ CHAT_ID = str(CHAT_ID)
 STATE_FILE = os.path.join(BASE_DIR, "data", "state.json")
 
 def save_state():
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     temp_file = STATE_FILE + '.tmp'
     with open(temp_file, 'w') as f:
         json.dump({
@@ -426,7 +430,7 @@ def get_signal(df, coin, tf):
 # ============================================================
 # RISK MANAGEMENT
 # ============================================================
-def can_open_position(coin, tf):
+def can_open_position(coin, tf, votes=1):
     global capital, peak_capital, positions
     
     key = f"{coin}_{tf}"
@@ -459,6 +463,11 @@ def can_open_position(coin, tf):
     
     return True, size
 def record_oi():
+    # Chỉ lưu nếu cách lần cuối > 3500 giây (~1h)
+    if hasattr(record_oi, 'last_time'):
+        if (datetime.now(timezone.utc) - record_oi.last_time).total_seconds() < 3500:
+            return
+    record_oi.last_time = datetime.now(timezone.utc)
     OI_RECORD_DIR = os.path.join(BASE_DIR, "data", "oi_history")
     os.makedirs(OI_RECORD_DIR, exist_ok=True)
     for coin in COINS:
@@ -597,12 +606,11 @@ def main():
                     send_discord(msg)
                     # Cập nhật edge performance
                     if 'cond_str' in pos:
-                        # Tách thành list nếu có nhiều edge
-                        edge_list = pos['cond_str'].split('+') if '+' in pos['cond_str'] else [pos['cond_str']]
+                        edge_list = pos['cond_str'] if isinstance(pos['cond_str'], list) else [pos['cond_str']]
                         for single_edge in edge_list:
-                            update_edge_performance(coin, tf, single_edge.strip(),
+                            update_edge_performance(coin, tf, single_edge,
                                                     pos['direction'], trade_return * 100)
-                            update_edge_weight(coin, tf, single_edge.strip(),
+                            update_edge_weight(coin, tf, single_edge,
                                               pos['direction'], trade_return * 100)
                     save_state()
                     to_remove.append(key)
@@ -642,7 +650,7 @@ def main():
                     last_checks[last_key] = now
                     
                     if signal != 0:
-                        can_open, size = can_open_position(coin, tf_name)
+                        can_open, size = can_open_position(coin, tf_name, votes)
                         
                         if can_open:
                             latest = df.iloc[-1]
@@ -662,7 +670,7 @@ def main():
                                 'stop_loss': stop_loss, 'size': size,
                                 'direction': 'LONG' if signal == 1 else 'SHORT',
                                 'entry_capital': capital,
-                                'cond_str': active_edges[0] if len(active_edges) == 1 else ('+'.join(active_edges) if active_edges else 'unknown'),
+                                'cond_str': active_edges if active_edges else ['unknown'],
                             }
                             
                             if tf_name == '15m':
@@ -838,7 +846,8 @@ def update_edge_weight(coin, tf, cond_str, direction, pnl_pct):
         EDGE_WEIGHTS[edge_id] = 1.0
     
     alpha = 0.1
-    score = 1.5 if pnl_pct > 0.02 else (0.5 if pnl_pct < -0.02 else 1.0)
+    # pnl_pct đang là % (vd: 1.0 = 1%)
+    score = 1.5 if pnl_pct > 2.0 else (0.5 if pnl_pct < -2.0 else 1.0)
     EDGE_WEIGHTS[edge_id] = 0.9 * EDGE_WEIGHTS[edge_id] + alpha * score
     EDGE_WEIGHTS[edge_id] = max(0.1, min(3.0, EDGE_WEIGHTS[edge_id]))
     save_weights()    
