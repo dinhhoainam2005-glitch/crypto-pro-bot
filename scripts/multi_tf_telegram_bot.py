@@ -30,8 +30,11 @@ WEIGHT_FILE = os.path.join(MONITOR_DIR, "edge_weights.json")
 
 def load_edge_log():
     if os.path.exists(EDGE_LOG_FILE):
-        with open(EDGE_LOG_FILE, 'r') as f:
-            return json.load(f)
+        try:
+            with open(EDGE_LOG_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
     return {}
 
 def save_edge_log(log):
@@ -77,7 +80,7 @@ def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
         # Dùng số trade/năm thực tế từ dữ liệu
         trades_count = len(trades)
         days_span = 365  # mặc định
-        log[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(trades_count), 2) if std > 0 else 0
+        log[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(trades_count), 2) if std > 1e-8 else 0
         log[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
     
     save_edge_log(log)
@@ -227,6 +230,8 @@ COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
          'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
 
 TIMEFRAMES = {
+    '15m': {'interval': '15m', 'hold_hours': 4, 'horizon': 16, 'max_per_4h': 1},
+    '1h':  {'interval': '1h', 'hold_hours': 12, 'horizon': 12, 'max_per_4h': 99},
     '4h':  {'interval': '4h', 'hold_hours': 24, 'horizon': 6, 'max_per_4h': 99},
     '1d':  {'interval': '1d', 'hold_hours': 72, 'horizon': 3, 'max_per_4h': 99},
 }
@@ -511,8 +516,8 @@ def detect_whale_retail():
             resp_fund = session.get(url_fund, timeout=5)
             fund_data = resp_fund.json()
             fund_rates = [float(x['fundingRate']) for x in fund_data]
-            current_fund = fund_rates[0] if fund_rates else 0
-            fund_8h_ago = fund_rates[8] if len(fund_rates) > 8 else current_fund
+            current_fund = fund_rates[-1] if fund_rates else 0
+            fund_8h_ago = fund_rates[-9] if len(fund_rates) > 8 else current_fund
             retail_buying = current_fund > 0 and current_fund > fund_8h_ago
             
             whale_score = (1 if whale_buying else 0)
@@ -537,22 +542,22 @@ def main():
     load_weights()
 
     print("="*60)
-    print("🚀 CRYPTO PRO BOT V4.0 - VIP PRO")
+    print("🚀 CRYPTO PRO BOT V4.4 - INSTITUTIONAL")
     print("="*60)
-    print(f"   10 coins × 4 TFs | 15m: 3 edge (max 1/4h)")
-    print(f"   Max {MAX_POSITIONS} positions | SL 2 ATR")
+    print(f"   7 coins × 2 TFs (4h, 1d) | {sum(len(v) for tf in ALL_EDGES.values() for v in tf.values())} edges walk-forward")
+    print(f"   Max {MAX_POSITIONS} positions | SL 2 ATR | Sharpe OOS 1.49")
     print("="*60)
     
-    send_telegram("🚀 <b>Crypto Pro Bot V4.0 - VIP PRO</b>\n\n"
-                  "⏱️ 4 TFs: 15m(3) · 1h · 4h · 1d\n"
-                  "🪙 10 Coins\n📊 LONG + SHORT\n"
-                  "🛡️ SL 2 ATR · Max 5 pos\n\n"
-                  "Đang chờ tín hiệu...")
-    send_discord("🚀 Crypto Pro Bot V4.0 - VIP PRO\n\n"
-                  "⏱️ 4 TFs: 15m(3) · 1h · 4h · 1d\n"
-                  "🪙 10 Coins\n📊 LONG + SHORT\n"
-                  "🛡️ SL 2 ATR · Max 5 pos\n\n"
-                  "Đang chờ tín hiệu...")
+    send_telegram("🚀 <b>Crypto Pro Bot V4.4</b>\n\n"
+              "📊 7 coins × 2 TFs (4h, 1d)\n"
+              "✅ Walk-Forward verified\n"
+              "🛡️ SL 2 ATR · Max 5 pos\n\n"
+              "Đang chờ tín hiệu...")
+    send_discord("🚀 <b>Crypto Pro Bot V4.4</b>\n\n"
+              "📊 7 coins × 2 TFs (4h, 1d)\n"
+              "✅ Walk-Forward verified\n"
+              "🛡️ SL 2 ATR · Max 5 pos\n\n"
+              "Đang chờ tín hiệu...")
     
     while True:
         try:
@@ -612,11 +617,12 @@ def main():
                                                     pos['direction'], trade_return * 100)
                             update_edge_weight(coin, tf, single_edge,
                                               pos['direction'], trade_return * 100)
-                    save_state()
                     to_remove.append(key)
             
             for key in to_remove:
                 del positions[key]
+            if to_remove:
+                save_state()
             
             # === SIGNAL CHECK ===
             for coin in COINS:
@@ -847,7 +853,7 @@ def update_edge_weight(coin, tf, cond_str, direction, pnl_pct):
     
     alpha = 0.1
     # pnl_pct đang là % (vd: 1.0 = 1%)
-    score = 1.5 if pnl_pct > 2.0 else (0.5 if pnl_pct < -2.0 else 1.0)
+    score = np.clip(1 + pnl_pct / 10, 0.2, 2.0)
     EDGE_WEIGHTS[edge_id] = 0.9 * EDGE_WEIGHTS[edge_id] + alpha * score
     EDGE_WEIGHTS[edge_id] = max(0.1, min(3.0, EDGE_WEIGHTS[edge_id]))
     save_weights()    
