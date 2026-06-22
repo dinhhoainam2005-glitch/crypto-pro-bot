@@ -438,7 +438,6 @@ def get_signal(df, coin, tf):
     elif short_weighted > long_weighted and short_weighted >= 1.0:
         return -1, round(short_weighted, 1)
     return 0, 0
-    return 0, 0
 
 # ============================================================
 # RISK MANAGEMENT
@@ -689,8 +688,9 @@ def main():
             print(f"⚠️ ERROR: {e}")
             import traceback
             traceback.print_exc()
-            # === DOMINANCE CHECK (mỗi 1h) ===
-        if now.minute < 5 and now.second < 30:  # Đầu mỗi giờ
+        
+        # === DOMINANCE CHECK (mỗi 1h) ===
+        if now.minute < 5 and now.second < 30:
             dom_key = f"dom_{now.hour}"
             if dom_key not in last_checks:
                 last_checks[dom_key] = now
@@ -698,20 +698,27 @@ def main():
                 for alert in dom_alerts:
                     send_telegram(alert)
                     send_discord(alert)
+        
         # === WEEKLY REPORT (Chủ nhật 00:00) ===
-        # === AUTO SCANNER (Ngày 1 hàng tháng) ===
-#        if now.day == 1 and now.hour == 0 and now.minute < 5:
-#            scan_key = f"scan_{now.month}"
-#            if scan_key not in last_checks:
-#                last_checks[scan_key] = now
-#                new_edges = auto_scan_new_edges()
-#                if new_edges:
-#                    added = add_new_edges(new_edges)
-#                    send_telegram(f"🔍 <b>AUTO SCANNER:</b> Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
         if now.weekday() == 6 and now.hour == 0 and now.minute < 5:
-            report = weekly_edge_report()
-            send_telegram(report)
-            send_discord(report)        
+            report_key = f"weekly_{now.date()}"
+            if report_key not in last_checks:
+                last_checks[report_key] = now
+                report = weekly_edge_report()
+                send_telegram(report)
+                send_discord(report)
+        
+        # === AUTO SCANNER (Ngày 1 hàng tháng) ===
+        if now.day == 1 and now.hour == 0 and now.minute < 5:
+            scan_key = f"scan_{now.month}"
+            if scan_key not in last_checks:
+                last_checks[scan_key] = now
+                new_edges = auto_scan_new_edges()
+                if new_edges:
+                    added = add_new_edges(new_edges)
+                    send_telegram(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
+                    send_discord(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
+        
         # === WHALE/RETAIL CHECK (mỗi 4h) ===
         if now.hour % 4 == 0 and now.minute < 5 and now.second < 30:
             whale_key = f"whale_{now.hour}"
@@ -720,8 +727,9 @@ def main():
                 whale_alerts = detect_whale_retail()
                 for alert in whale_alerts:
                     send_telegram(alert)
-                    send_discord(alert)            
-            time.sleep(30)
+                    send_discord(alert)
+        
+        time.sleep(30)
             
 
 def fetch_dominance():
@@ -763,6 +771,7 @@ def fetch_dominance():
     except Exception as e:
         print(f"Dominance error: {e}")
         return []
+    
     CONDITIONS_SCAN = {
     'FUND_P5': lambda d: d['funding_rate'] < d['funding_p5'],
     'FUND_P95': lambda d: d['funding_rate'] > d['funding_p95'],
