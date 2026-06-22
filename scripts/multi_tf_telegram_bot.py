@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 import requests
+session = requests.Session()
 import json
 from itertools import combinations
 
@@ -167,7 +168,8 @@ CHAT_ID = str(CHAT_ID)
 STATE_FILE = os.path.join(BASE_DIR, "data", "state.json")
 
 def save_state():
-    with open(STATE_FILE, 'w') as f:
+    temp_file = STATE_FILE + '.tmp'
+    with open(temp_file, 'w') as f:
         json.dump({
             'capital': capital,
             'peak_capital': peak_capital,
@@ -182,6 +184,7 @@ def save_state():
                 'cond_str': v.get('cond_str', 'unknown')
             } for k, v in positions.items()}
         }, f)
+    os.replace(temp_file, STATE_FILE)
 
 def load_state():
     global capital, peak_capital, positions
@@ -210,7 +213,7 @@ def send_discord(message):
     clean_msg = re.sub(r'<[^>]+>', '', message)  # Xóa HTML tags
     payload = {'content': clean_msg}
     try:
-        requests.post(DISCORD_WEBHOOK, json=payload, timeout=5)
+        session.post(DISCORD_WEBHOOK, json=payload, timeout=5)
     except:
         pass
 # ============================================================
@@ -250,7 +253,7 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {'chat_id': CHAT_ID, 'text': message, 'parse_mode': 'HTML'}
     try:
-        requests.post(url, json=payload, timeout=10)
+        session.post(url, json=payload, timeout=10)
     except:
         pass
 
@@ -261,7 +264,7 @@ def fetch_klines(symbol, interval='1h', limit=500):
     url = "https://fapi.binance.com/fapi/v1/klines"
     params = {'symbol': symbol, 'interval': interval, 'limit': limit}
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        resp = session.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             df = pd.DataFrame(data, columns=[
@@ -282,7 +285,7 @@ def fetch_funding_rate(symbol):
     url = "https://fapi.binance.com/fapi/v1/fundingRate"
     params = {'symbol': symbol, 'limit': 1}
     try:
-        resp = requests.get(url, params=params, timeout=5)
+        resp = session.get(url, params=params, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
             return float(data[0]['fundingRate']) if data else 0.0001
@@ -293,7 +296,7 @@ def fetch_funding_rate(symbol):
 def fetch_oi(symbol):
     url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}"
     try:
-        resp = requests.get(url, timeout=5).json()
+        resp = session.get(url, timeout=5).json()
         if 'openInterest' in resp:
             return float(resp['openInterest'])
     except:
@@ -458,7 +461,7 @@ def record_oi():
     for coin in COINS:
         try:
             url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={coin}"
-            resp = requests.get(url, timeout=5).json()
+            resp = session.get(url, timeout=5).json()
             if 'openInterest' in resp:
                 oi_val = float(resp['openInterest'])
                 ts = datetime.now(timezone.utc)
@@ -481,7 +484,7 @@ def detect_whale_retail():
         try:
             # Fetch 1h klines
             url = f"https://fapi.binance.com/fapi/v1/klines?symbol={coin}&interval=1h&limit=200"
-            resp = requests.get(url, timeout=10)
+            resp = session.get(url, timeout=10)
             df = pd.DataFrame(resp.json(), columns=['t','o','h','l','c','v','x','q','n','tb','tq','i'])
             for col in ['o','h','l','c','v']: df[col] = df[col].astype(float)
             
@@ -493,7 +496,7 @@ def detect_whale_retail():
             
             # Funding
             url_fund = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={coin}&limit=50"
-            resp_fund = requests.get(url_fund, timeout=5)
+            resp_fund = session.get(url_fund, timeout=5)
             fund_data = resp_fund.json()
             fund_rates = [float(x['fundingRate']) for x in fund_data]
             current_fund = fund_rates[0] if fund_rates else 0
@@ -741,11 +744,11 @@ def fetch_dominance():
     headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY, 'Accept': 'application/json'}
     try:
         url = "https://pro-api.coinmarketcap.com/v1/global-metrics/quotes/latest"
-        resp = requests.get(url, headers=headers, timeout=10)
+        resp = session.get(url, headers=headers, timeout=10)
         total_mcap = resp.json()['data']['quote']['USD']['total_market_cap']
         
         url2 = f"https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol={','.join(DOM_COINS)}&convert=USD"
-        resp2 = requests.get(url2, headers=headers, timeout=10)
+        resp2 = session.get(url2, headers=headers, timeout=10)
         data = resp2.json()
         
         alerts = []
@@ -818,18 +821,15 @@ def get_edge_weight(coin, tf, cond_str, direction):
     return max(0.1, min(3.0, weight))  # Clamp 0.1 - 3.0
 
 def update_edge_weight(coin, tf, cond_str, direction, pnl_pct):
-    """Cập nhật weight sau mỗi trade"""
     edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
-    
     if edge_id not in EDGE_WEIGHTS:
         EDGE_WEIGHTS[edge_id] = 1.0
     
-    # Thắng → +0.1, thua → -0.1
-    if pnl_pct > 0:
-        EDGE_WEIGHTS[edge_id] = min(3.0, EDGE_WEIGHTS[edge_id] + 0.1)
-    else:
-        EDGE_WEIGHTS[edge_id] = max(0.1, EDGE_WEIGHTS[edge_id] - 0.1)
-        save_weights()    
+    alpha = 0.1
+    score = 1.5 if pnl_pct > 0.02 else (0.5 if pnl_pct < -0.02 else 1.0)
+    EDGE_WEIGHTS[edge_id] = 0.9 * EDGE_WEIGHTS[edge_id] + alpha * score
+    EDGE_WEIGHTS[edge_id] = max(0.1, min(3.0, EDGE_WEIGHTS[edge_id]))
+    save_weights()    
 
 def auto_scan_new_edges():
     """Quét edge mới từ dữ liệu 1h gần nhất"""
