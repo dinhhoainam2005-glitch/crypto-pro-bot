@@ -62,7 +62,8 @@ def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
     if len(trades) >= 10:
         avg = sum(trades) / len(trades)
         std = (sum((t - avg)**2 for t in trades) / len(trades)) ** 0.5
-        log[edge_id]['live_sharpe'] = round(avg / std * (365*2)**0.5, 2) if std > 0 else 0
+        tf_annual = {'15m': 365*96, '1h': 365*24, '4h': 365*6, '1d': 365}[tf]
+        log[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(tf_annual), 2) if std > 0 else 0
         log[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
     
     save_edge_log(log)
@@ -80,10 +81,10 @@ def check_edge_health():
         trades = data.get('trades', [])
         if len(trades) >= 10:
             recent = trades[-10:]
-            avg_recent = sum(t['pnl_pct'] for t in recent) / 10
+            avg_recent = sum(t['pnl_pct'] for t in recent) / 30
             
             # Chết nếu Sharpe < -2 hoặc thua 8/10 lệnh gần nhất
-            if avg_recent < -0.02 or sum(1 for t in recent if t['pnl_pct'] > 0) <= 2:
+            if avg_recent < -0.02 or sum(1 for t in recent if t['pnl_pct'] > 0) <= 10:
                 data['status'] = 'DEPRECATED'
                 data['deprecated_time'] = now.isoformat()
                 alerts.append(
@@ -380,11 +381,12 @@ def eval_cond(name, d):
 
 def get_signal(df, coin, tf):
     if tf not in ALL_EDGES or coin not in ALL_EDGES[tf]:
-        return 0, 0
+        return 0, 0, []
     
     latest = df.iloc[-1]
     long_weighted = 0.0
     short_weighted = 0.0
+    active_edges = []
     
     for cond_str, direction in ALL_EDGES[tf][coin]:
         conds = cond_str.split('+')
@@ -395,12 +397,13 @@ def get_signal(df, coin, tf):
                 long_weighted += w
             else:
                 short_weighted += w
+            active_edges.append(cond_str)
     
     if long_weighted > short_weighted and long_weighted >= 1.0:
-        return 1, round(long_weighted, 1)
+        return 1, round(long_weighted, 1), active_edges
     elif short_weighted > long_weighted and short_weighted >= 1.0:
-        return -1, round(short_weighted, 1)
-    return 0, 0
+        return -1, round(short_weighted, 1), active_edges
+    return 0, 0, []
 
 # ============================================================
 # RISK MANAGEMENT
@@ -574,6 +577,8 @@ def main():
                     if 'cond_str' in pos:
                         update_edge_performance(coin, tf, pos.get('cond_str',''),
                                                 pos['direction'], trade_return * 100)
+                        update_edge_weight(coin, tf, pos.get('cond_str',''),
+                                                pos['direction'], trade_return * 100)
                     save_state()
                     to_remove.append(key)
             
@@ -608,7 +613,7 @@ def main():
                     oi = fetch_oi(coin)
                     df = compute_indicators(df, funding, oi, tf_config)
                     
-                    signal, votes = get_signal(df, coin, tf_name)
+                    signal, votes, active_edges = get_signal(df, coin, tf_name)
                     last_checks[last_key] = now
                     
                     if signal != 0:
@@ -631,7 +636,8 @@ def main():
                                 'entry_price': entry_price, 'entry_time': now,
                                 'stop_loss': stop_loss, 'size': size,
                                 'direction': 'LONG' if signal == 1 else 'SHORT',
-                                'entry_capital': capital
+                                'entry_capital': capital,
+                                'cond_str': ','.join(active_edges) if active_edges else 'unknown',
                             }
                             
                             if tf_name == '15m':
