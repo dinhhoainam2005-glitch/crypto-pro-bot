@@ -17,6 +17,8 @@ DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55F
 CMC_API_KEY = "ba07282bfe644708a9f42be12a33acf6"
 DOM_COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ARB', 'OP', 'LINK', 'AVAX', 'DOGE']
 DOM_HISTORY = {}
+WHALE_COINS_BINANCE = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+                       'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
 
 # ============================================================
 # CONFIG
@@ -363,6 +365,56 @@ def can_open_position(coin, tf):
     size = max(0.03, size)
     
     return True, size
+def detect_whale_retail():
+    """Phát hiện cá voi vs cá con"""
+    alerts = []
+    
+    for coin in WHALE_COINS_BINANCE:
+        try:
+            # Fetch 1h klines
+            url = f"https://fapi.binance.com/fapi/v1/klines?symbol={coin}&interval=1h&limit=200"
+            resp = requests.get(url, timeout=10)
+            df = pd.DataFrame(resp.json(), columns=['t','o','h','l','c','v','x','q','n','tb','tq','i'])
+            for col in ['o','h','l','c','v']: df[col] = df[col].astype(float)
+            
+            # CVD
+            df['cvd'] = (df['v'] * (df['c'] - df['o']) / (df['h'] - df['l'] + 0.01)).cumsum()
+            cvd_24h = df['cvd'].iloc[-1] - df['cvd'].iloc[-25] if len(df) >= 25 else 0
+            whale_buying = cvd_24h > 0
+            
+            # OI Bybit
+            url_oi = f"https://api.bybit.com/v5/market/open-interest?category=linear&symbol={coin}&intervalTime=1h&limit=50"
+            resp_oi = requests.get(url_oi, timeout=5)
+            oi_data = resp_oi.json()
+            if oi_data.get('retCode') == 0:
+                oi_list = oi_data['result']['list']
+                oi_values = [float(x['openInterest']) for x in oi_list]
+                oi_chg = (oi_values[0] - oi_values[23]) / oi_values[23] * 100 if len(oi_values) >= 24 else 0
+            else:
+                oi_chg = 0
+            whale_oi_up = oi_chg > 0.5
+            
+            # Funding
+            url_fund = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={coin}&limit=50"
+            resp_fund = requests.get(url_fund, timeout=5)
+            fund_data = resp_fund.json()
+            fund_rates = [float(x['fundingRate']) for x in fund_data]
+            current_fund = fund_rates[0] if fund_rates else 0
+            fund_8h_ago = fund_rates[8] if len(fund_rates) > 8 else current_fund
+            retail_buying = current_fund > 0 and current_fund > fund_8h_ago
+            
+            whale_score = (1 if whale_buying else 0) + (1 if whale_oi_up else 0)
+            retail_score = 1 if retail_buying else 0
+            
+            if whale_score >= 2 and retail_score == 0:
+                alerts.append(f"🔵 <b>WHALE ALERT: {coin}</b>\n   Cá voi đang GOM (CVD↑, OI↑), Cá con SỢ (Funding↓)\n   → Khả năng SẮP BƠM")
+            elif whale_score == 0 and retail_score == 1:
+                alerts.append(f"🔴 <b>WHALE ALERT: {coin}</b>\n   Cá voi đang XẢ, Cá con MUA\n   → Khả năng PHÂN PHỐI - SẮP GIẢM")
+        
+        except:
+            pass
+    
+    return alerts
 
 # ============================================================
 # MAIN
@@ -535,7 +587,15 @@ def main():
                 for alert in dom_alerts:
                     send_telegram(alert)
                     send_discord(alert)
-                    
+        # === WHALE/RETAIL CHECK (mỗi 4h) ===
+        if now.hour % 4 == 0 and now.minute < 5 and now.second < 30:
+            whale_key = f"whale_{now.hour}"
+            if whale_key not in last_checks:
+                last_checks[whale_key] = now
+                whale_alerts = detect_whale_retail()
+                for alert in whale_alerts:
+                    send_telegram(alert)
+                    send_discord(alert)            
             time.sleep(30)
             
 
