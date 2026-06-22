@@ -25,6 +25,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MONITOR_DIR = os.path.join(BASE_DIR, "data", "monitor")
 os.makedirs(MONITOR_DIR, exist_ok=True)
 EDGE_LOG_FILE = os.path.join(MONITOR_DIR, "edge_live_performance.json")
+WEIGHT_FILE = os.path.join(MONITOR_DIR, "edge_weights.json")
 
 def load_edge_log():
     if os.path.exists(EDGE_LOG_FILE):
@@ -35,6 +36,15 @@ def load_edge_log():
 def save_edge_log(log):
     with open(EDGE_LOG_FILE, 'w') as f:
         json.dump(log, f, indent=2, default=str)
+def save_weights():
+    with open(WEIGHT_FILE, 'w') as f:
+        json.dump(EDGE_WEIGHTS, f)
+
+def load_weights():
+    global EDGE_WEIGHTS
+    if os.path.exists(WEIGHT_FILE):
+        with open(WEIGHT_FILE, 'r') as f:
+            EDGE_WEIGHTS = json.load(f)
 
 def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
     """Cập nhật hiệu suất edge sau mỗi lệnh"""
@@ -79,12 +89,14 @@ def check_edge_health():
             continue
         
         trades = data.get('trades', [])
-        if len(trades) >= 10:
-            recent = trades[-10:]
-            avg_recent = sum(t['pnl_pct'] for t in recent) / 30
+        if len(trades) >= 30:
+            recent = trades[-30:]
+            avg_recent = sum(t['pnl_pct'] for t in recent) / len(recent)
+            win_count = sum(1 for t in recent if t['pnl_pct'] > 0)
+            win_rate_recent = win_count / len(recent)
             
-            # Chết nếu Sharpe < -2 hoặc thua 8/10 lệnh gần nhất
-            if avg_recent < -0.02 or sum(1 for t in recent if t['pnl_pct'] > 0) <= 10:
+            # Deprecate nếu thắng <30% hoặc lỗ TB >1%
+            if win_rate_recent < 0.3 or avg_recent < -0.01:
                 data['status'] = 'DEPRECATED'
                 data['deprecated_time'] = now.isoformat()
                 alerts.append(
@@ -166,7 +178,8 @@ def save_state():
                 'stop_loss': v['stop_loss'],
                 'size': v['size'],
                 'direction': v['direction'],
-                'entry_capital': v['entry_capital']
+                'entry_capital': v['entry_capital'],
+                'cond_str': v.get('cond_str', 'unknown')
             } for k, v in positions.items()}
         }, f)
 
@@ -185,7 +198,8 @@ def load_state():
                     'stop_loss': v['stop_loss'],
                     'size': v['size'],
                     'direction': v['direction'],
-                    'entry_capital': v['entry_capital']
+                    'entry_capital': v['entry_capital'],
+                    'cond_str': v.get('cond_str', 'unknown')
                 }
 
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
@@ -321,6 +335,7 @@ def compute_indicators(df, funding_rate, oi_value, tf_config):
     df['vol_p95'] = df['volume'].rolling(vw, min_periods=20).apply(lambda x: np.percentile(x, 95), raw=True)
     df['vol_p99'] = df['volume'].rolling(vw, min_periods=20).apply(lambda x: np.percentile(x, 99), raw=True)
     df['vol_high'] = (df['volume'] > df['vol_p95']).astype(int)
+    df['vol_spike'] = (df['volume'] > df['vol_p99']).astype(int)
     
     df['price_chg'] = df['close'].pct_change(cvd_lb)
     df['price_up'] = (df['price_chg'] > 0.02).astype(int)
@@ -504,6 +519,7 @@ def detect_whale_retail():
 def main():
     global capital, peak_capital, positions, last_15m_signal_time
     load_state()
+    load_weights()
 
     print("="*60)
     print("🚀 CRYPTO PRO BOT V4.0 - VIP PRO")
@@ -575,10 +591,13 @@ def main():
                     send_discord(msg)
                     # Cập nhật edge performance
                     if 'cond_str' in pos:
-                        update_edge_performance(coin, tf, pos.get('cond_str',''),
-                                                pos['direction'], trade_return * 100)
-                        update_edge_weight(coin, tf, pos.get('cond_str',''),
-                                                pos['direction'], trade_return * 100)
+                        # Tách thành list nếu có nhiều edge
+                        edge_list = pos['cond_str'].split('+') if '+' in pos['cond_str'] else [pos['cond_str']]
+                        for single_edge in edge_list:
+                            update_edge_performance(coin, tf, single_edge.strip(),
+                                                    pos['direction'], trade_return * 100)
+                            update_edge_weight(coin, tf, single_edge.strip(),
+                                              pos['direction'], trade_return * 100)
                     save_state()
                     to_remove.append(key)
             
@@ -637,7 +656,7 @@ def main():
                                 'stop_loss': stop_loss, 'size': size,
                                 'direction': 'LONG' if signal == 1 else 'SHORT',
                                 'entry_capital': capital,
-                                'cond_str': ','.join(active_edges) if active_edges else 'unknown',
+                                'cond_str': active_edges[0] if len(active_edges) == 1 else ('+'.join(active_edges) if active_edges else 'unknown'),
                             }
                             
                             if tf_name == '15m':
@@ -809,7 +828,8 @@ def update_edge_weight(coin, tf, cond_str, direction, pnl_pct):
     if pnl_pct > 0:
         EDGE_WEIGHTS[edge_id] = min(3.0, EDGE_WEIGHTS[edge_id] + 0.1)
     else:
-        EDGE_WEIGHTS[edge_id] = max(0.1, EDGE_WEIGHTS[edge_id] - 0.1)    
+        EDGE_WEIGHTS[edge_id] = max(0.1, EDGE_WEIGHTS[edge_id] - 0.1)
+        save_weights()    
 
 def auto_scan_new_edges():
     """Quét edge mới từ dữ liệu 1h gần nhất"""
