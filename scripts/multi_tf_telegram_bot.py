@@ -203,8 +203,6 @@ COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
          'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
 
 TIMEFRAMES = {
-    '15m': {'interval': '15m', 'hold_hours': 4, 'horizon': 16, 'max_per_4h': 1},
-    '1h':  {'interval': '1h', 'hold_hours': 12, 'horizon': 12, 'max_per_4h': 99},
     '4h':  {'interval': '4h', 'hold_hours': 24, 'horizon': 6, 'max_per_4h': 99},
     '1d':  {'interval': '1d', 'hold_hours': 72, 'horizon': 3, 'max_per_4h': 99},
 }
@@ -338,61 +336,30 @@ def compute_indicators(df, funding_rate, oi_value, tf_config):
 # TOÀN BỘ EDGES (FINAL)
 # ============================================================
 ALL_EDGES = {
-    '15m': {
-        'ARBUSDT': [('FUND_P5+TREND_DOWN', 'SHORT'), ('FUND_P5+CVD_DOWN', 'SHORT')],
-        'ETHUSDT': [('FUND_RISING+TREND_UP', 'LONG')],
-        'LINKUSDT': [('FUND_P95+PRICE_UP', 'SHORT'), ('FUND_P95+CVD_UP', 'SHORT')],
-    },
-    '1h': {
-        'ARBUSDT': [('FUND_P5+FUND_POS+PRICE_UP', 'SHORT'), ('FUND_P95+CVD_DOWN+TREND_UP', 'LONG'), ('FUND_P5+PRICE_UP+TREND_UP', 'SHORT')],
-        'AVAXUSDT': [('FUND_P1+FUND_POS+CVD_UP', 'SHORT'), ('FUND_P1+FUND_POS+TREND_UP', 'SHORT'), ('FUND_P99+CVD_DOWN+TREND_DOWN', 'SHORT'), ('FUND_NEG+CVD_DOWN+PRICE_UP', 'SHORT'), ('FUND_P99+FUND_RISING+TREND_DOWN', 'SHORT'), ('FUND_P99+TREND_DOWN', 'SHORT'), ('FUND_P95+FUND_P99+TREND_DOWN', 'SHORT')],
-        'BNBUSDT': [('FUND_P5+FUND_RISING+PRICE_DOWN', 'LONG'), ('FUND_P5+FUND_RISING+TREND_DOWN', 'LONG'), ('FUND_P5+FUND_RISING+CVD_DOWN', 'LONG'), ('FUND_P5+FUND_RISING', 'LONG'), ('FUND_P95+FUND_P99+VOL_HIGH', 'SHORT')],
-        'BTCUSDT': [('FUND_P99+PRICE_DOWN+TREND_DOWN', 'LONG'), ('FUND_P99+PRICE_DOWN', 'LONG'), ('FUND_P99+FUND_POS+PRICE_DOWN', 'LONG'), ('FUND_P95+FUND_P99+PRICE_DOWN', 'LONG'), ('FUND_P99+FUND_RISING+PRICE_DOWN', 'LONG'), ('FUND_P99+CVD_DOWN+PRICE_DOWN', 'LONG')],
-        'DOGEUSDT': [('FUND_P5+FUND_POS+FUND_RISING', 'SHORT'), ('FUND_P95+CVD_UP+TREND_DOWN', 'SHORT'), ('FUND_P5+FUND_NEG+VOL_SPIKE', 'LONG'), ('FUND_NEG+VOL_SPIKE+TREND_DOWN', 'LONG')],
-        'ETHUSDT': [('FUND_P5+VOL_HIGH+PRICE_UP', 'LONG'), ('FUND_P99+CVD_DOWN+PRICE_DOWN', 'LONG'), ('FUND_P95+FUND_P99+PRICE_DOWN', 'LONG'), ('FUND_P99+FUND_RISING+PRICE_DOWN', 'LONG'), ('FUND_P99+PRICE_DOWN', 'LONG'), ('FUND_P99+FUND_POS+PRICE_DOWN', 'LONG'), ('FUND_NEG+PRICE_DOWN+TREND_UP', 'LONG'), ('FUND_NEG+FUND_RISING+VOL_HIGH', 'LONG')],
-        'LINKUSDT': [('FUND_P99+CVD_DOWN+TREND_DOWN', 'SHORT')],
-        'OPUSDT': [('FUND_P5+FUND_POS+FUND_RISING', 'SHORT'), ('FUND_P99+CVD_UP+VOL_HIGH', 'SHORT'), ('FUND_P5+FUND_RISING+CVD_DOWN', 'SHORT')],
-        'XRPUSDT': [('FUND_P5+FUND_RISING+PRICE_DOWN', 'LONG'), ('FUND_P5+FUND_RISING+TREND_DOWN', 'LONG'), ('FUND_P5+FUND_RISING+CVD_DOWN', 'LONG'), ('FUND_P95+CVD_UP+TREND_DOWN', 'SHORT')],
-    },
     '4h': {
-        'ARBUSDT': [('FUND_P5+FUND_POS', 'SHORT'), ('FUND_P5+VOL_HIGH', 'LONG'), ('FUND_P5+FUND_RISING', 'SHORT'), ('FUND_NEG+VOL_HIGH', 'LONG'), ('VOL_SPIKE+PRICE_DOWN', 'LONG')],
-        'AVAXUSDT': [('FUND_RISING+VOL_SPIKE', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG'), ('FUND_POS+TREND_DOWN', 'SHORT'), ('FUND_RISING+VOL_HIGH', 'LONG')],
-        'BNBUSDT': [('FUND_P99+TREND_DOWN', 'SHORT'), ('FUND_P95+TREND_DOWN', 'SHORT'), ('FUND_NEG+PRICE_UP', 'SHORT'), ('FUND_P99+PRICE_UP', 'SHORT')],
-        'BTCUSDT': [('FUND_P5+PRICE_DOWN', 'LONG'), ('FUND_P95+PRICE_DOWN', 'LONG'), ('FUND_NEG+VOL_HIGH', 'LONG'), ('FUND_NEG+PRICE_DOWN', 'LONG')],
-        'DOGEUSDT': [('FUND_P5+FUND_POS', 'SHORT'), ('FUND_P5+CVD_UP', 'LONG')],
-        'ETHUSDT': [('FUND_P95+TREND_DOWN', 'SHORT'), ('FUND_P95+CVD_DOWN', 'SHORT'), ('FUND_P5+VOL_HIGH', 'LONG'), ('FUND_P5+VOL_SPIKE', 'LONG'), ('PRICE_UP+TREND_UP', 'LONG')],
-        'LINKUSDT': [('FUND_P5+PRICE_UP', 'SHORT'), ('FUND_P5+CVD_UP', 'SHORT'), ('FUND_RISING+VOL_HIGH', 'LONG'), ('FUND_RISING+VOL_SPIKE', 'LONG')],
-        'OPUSDT': [('FUND_P5+FUND_RISING', 'SHORT'), ('FUND_NEG+VOL_SPIKE', 'LONG'), ('FUND_P5+PRICE_DOWN', 'SHORT'), ('FUND_RISING+VOL_HIGH', 'LONG')],
-        'SOLUSDT': [('FUND_P99+CVD_UP', 'LONG')],
-        'XRPUSDT': [('VOL_SPIKE+PRICE_DOWN', 'LONG'), ('FUND_P95+TREND_DOWN', 'SHORT'), ('VOL_HIGH+PRICE_DOWN', 'LONG'), ('CVD_DOWN+VOL_SPIKE', 'LONG'), ('VOL_SPIKE+TREND_DOWN', 'LONG')],
+        'BTCUSDT': [('FUND_NEG+VOL_HIGH', 'LONG'), ('FUND_NEG+PRICE_DOWN', 'LONG')],
+        'ARBUSDT': [('FUND_NEG+VOL_HIGH', 'LONG')],
+        'AVAXUSDT': [('VOL_HIGH+PRICE_DOWN', 'LONG'), ('FUND_RISING+VOL_HIGH', 'LONG')],
+        'OPUSDT': [('FUND_NEG+VOL_SPIKE', 'LONG'), ('FUND_RISING+VOL_HIGH', 'LONG')],
+        'LINKUSDT': [('FUND_RISING+VOL_HIGH', 'LONG')],
+        'XRPUSDT': [('VOL_SPIKE+PRICE_DOWN', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG')],
     },
     '1d': {
-        'ARBUSDT': [('VOL_HIGH+PRICE_UP', 'SHORT'), ('CVD_UP+VOL_HIGH', 'SHORT'), ('FUND_NEG+FUND_RISING', 'SHORT')],
-        'AVAXUSDT': [('FUND_NEG+PRICE_UP', 'SHORT'), ('PRICE_UP+TREND_DOWN', 'SHORT'), ('CVD_UP+TREND_DOWN', 'SHORT')],
-        'BNBUSDT': [('VOL_HIGH+PRICE_UP', 'SHORT'), ('VOL_HIGH+TREND_DOWN', 'SHORT'), ('FUND_P5+TREND_UP', 'SHORT'), ('FUND_NEG+FUND_RISING', 'SHORT')],
-        'BTCUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG'), ('FUND_NEG+TREND_UP', 'LONG'), ('FUND_NEG+CVD_DOWN', 'LONG'), ('FUND_P5+FUND_POS', 'LONG')],
-        'DOGEUSDT': [('PRICE_DOWN+TREND_UP', 'SHORT'), ('FUND_POS+VOL_HIGH', 'LONG'), ('FUND_NEG+TREND_UP', 'SHORT'), ('VOL_HIGH+TREND_UP', 'LONG')],
-        'ETHUSDT': [('VOL_SPIKE+TREND_DOWN', 'SHORT'), ('FUND_NEG+VOL_HIGH', 'SHORT'), ('VOL_HIGH+TREND_DOWN', 'SHORT'), ('PRICE_UP+TREND_DOWN', 'SHORT'), ('VOL_SPIKE+PRICE_DOWN', 'SHORT')],
-        'LINKUSDT': [('FUND_NEG+FUND_RISING', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG'), ('CVD_DOWN+VOL_HIGH', 'LONG'), ('FUND_POS+VOL_HIGH', 'LONG')],
-        'OPUSDT': [('FUND_P5+PRICE_DOWN', 'SHORT'), ('FUND_RISING+VOL_HIGH', 'LONG'), ('FUND_P5+FUND_NEG', 'SHORT'), ('FUND_NEG+FUND_RISING', 'SHORT')],
-        'SOLUSDT': [('FUND_P5+PRICE_DOWN', 'SHORT'), ('FUND_P95+FUND_RISING', 'LONG'), ('FUND_P95+FUND_POS', 'LONG'), ('FUND_P5+CVD_DOWN', 'SHORT')],
-        'XRPUSDT': [('VOL_HIGH+TREND_UP', 'LONG'), ('FUND_POS+VOL_HIGH', 'LONG'), ('FUND_NEG+TREND_UP', 'SHORT'), ('CVD_DOWN+VOL_HIGH', 'LONG')],
+        'BTCUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG'), ('FUND_NEG+TREND_UP', 'LONG'), ('FUND_NEG+CVD_DOWN', 'LONG')],
+        'ETHUSDT': [('FUND_NEG+VOL_HIGH', 'SHORT')],
+        'LINKUSDT': [('FUND_POS+VOL_HIGH', 'LONG'), ('CVD_DOWN+VOL_HIGH', 'LONG'), ('FUND_NEG+FUND_RISING', 'LONG')],
+        'XRPUSDT': [('FUND_POS+VOL_HIGH', 'LONG'), ('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+TREND_UP', 'LONG')],
+        'AVAXUSDT': [('PRICE_UP+TREND_DOWN', 'SHORT')],
     },
 }
 
 def eval_cond(name, d):
     mapping = {
-        'FUND_P1': d['funding_rate'] < d.get('funding_p1', -99),
-        'FUND_P5': d['funding_rate'] < d['funding_p5'],
-        'FUND_P95': d['funding_rate'] > d['funding_p95'],
-        'FUND_P99': d['funding_rate'] > d['funding_p99'],
         'FUND_POS': d['funding_rate'] > 0,
         'FUND_NEG': d['funding_rate'] < 0,
         'FUND_RISING': d['funding_rising'] == 1,
         'CVD_UP': d['cvd_up'] == 1,
         'CVD_DOWN': d['cvd_down'] == 1,
-        'OI_UP': d['oi_up'] == 1,
-        'OI_DOWN': d['oi_down'] == 1,
         'VOL_HIGH': d['vol_high'] == 1,
         'VOL_SPIKE': d['vol_spike'] if 'vol_spike' in d else False,
         'PRICE_UP': d['price_up'] == 1,
