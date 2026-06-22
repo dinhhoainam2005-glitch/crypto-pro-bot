@@ -683,11 +683,12 @@ def main():
                     send_telegram(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
                     send_discord(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
         # === OI RECORDER (mỗi 1h) ===
-        if now.minute < 5 and now.second < 30:
+        if now.minute < 5:
             oi_key = f"oi_record_{now.hour}"
             if oi_key not in last_checks:
                 last_checks[oi_key] = now
-                record_oi()            
+                record_oi()
+                print(f"✅ OI recorded at {now.strftime('%H:%M')}")            
         
         # === WHALE/RETAIL CHECK (mỗi 4h) ===
         if now.hour % 4 == 0 and now.minute < 5 and now.second < 30:
