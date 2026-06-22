@@ -290,19 +290,23 @@ def fetch_klines(symbol, interval='1h', limit=500):
         pass
     return None
 
-def fetch_funding_rate(symbol):
+def fetch_funding_history(symbol):
     url = "https://fapi.binance.com/fapi/v1/fundingRate"
-    params = {'symbol': symbol, 'limit': 1}
+    params = {'symbol': symbol, 'limit': 500}
     try:
-        resp = session.get(url, params=params, timeout=5)
+        resp = session.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
-            return float(data[0]['fundingRate']) if data else 0.0001
+            df = pd.DataFrame(data)
+            df['timestamp'] = pd.to_datetime(df['fundingTime'], unit='ms')
+            df['funding_rate'] = df['fundingRate'].astype(float)
+            df.set_index('timestamp', inplace=True)
+            return df[['funding_rate']]
     except:
         pass
-    return 0.0001
+    return None
 
-def fetch_oi(symbol):
+def fetch_oi_history(symbol):
     url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}"
     try:
         resp = session.get(url, timeout=5).json()
@@ -310,7 +314,7 @@ def fetch_oi(symbol):
             return float(resp['openInterest'])
     except:
         pass
-    return 50000
+    return None
 
 # ============================================================
 # INDICATORS
@@ -319,8 +323,17 @@ def compute_indicators(df, funding_rate, oi_value, tf_config):
     df = df.copy()
     n_per_day = {'15m': 96, '1h': 24, '4h': 6, '1d': 1}[tf_config['interval']]
     
-    df['funding_rate'] = funding_rate
-    df['oi'] = oi_value
+    if funding_rate is not None and isinstance(funding_rate, pd.DataFrame):
+        df = df.sort_index()
+        funding_rate = funding_rate.sort_index()
+        df = pd.merge_asof(df, funding_rate, left_index=True, right_index=True, direction='backward')
+        df['funding_rate'] = df['funding_rate'].ffill()
+    else:
+        df['funding_rate'] = 0.0001
+    if oi_value is not None:
+        df['oi'] = oi_value
+    else:
+        df['oi'] = 50000
     
     fw = max(50, 20 * n_per_day)
     vw = max(50, 20 * n_per_day)
@@ -648,8 +661,8 @@ def main():
                     if df is None:
                         continue
                     
-                    funding = fetch_funding_rate(coin)
-                    oi = fetch_oi(coin)
+                    funding = fetch_funding_history(coin)
+                    oi = fetch_oi_history(coin)
                     df = compute_indicators(df, funding, oi, tf_config)
                     
                     signal, votes, active_edges = get_signal(df, coin, tf_name)
@@ -886,7 +899,11 @@ def auto_scan_new_edges():
                     
                     signal = mask.astype(int) * direction
                     signal_shifted = signal.shift(1)
-                    ret = (df['close'].shift(-12) - df['open']) / df['open']
+                    # Entry = Open của nến sau tín hiệu
+                    entry_price = df['open'].shift(-1)
+                    # Exit = Close sau 12 nến kể từ entry
+                    exit_price = df['close'].shift(-13)
+                    ret = (exit_price - entry_price) / entry_price
                     strategy = ret * signal_shifted
                     valid = strategy[signal_shifted != 0].dropna()
                     
