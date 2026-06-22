@@ -439,13 +439,13 @@ def record_oi():
                 new_row = pd.DataFrame({'oi': [oi_val]}, index=[ts])
                 if os.path.exists(file_path):
                     existing = pd.read_parquet(file_path)
-                    existing = pd.concat([existing, new_row])
-                    existing = existing[~existing.index.duplicated(keep='last')]
-                    existing.to_parquet(file_path)
+                    if ts not in existing.index:
+                        existing = pd.concat([existing, new_row])
+                        existing.to_parquet(file_path)
                 else:
                     new_row.to_parquet(file_path)
-        except:
-            pass
+        except Exception as e:
+            print(f"OI record error {coin}: {e}")
 def detect_whale_retail():
     """Phát hiện cá voi vs cá con"""
     alerts = []
