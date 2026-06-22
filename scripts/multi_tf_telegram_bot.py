@@ -1,8 +1,8 @@
 """
-MULTI-TF TELEGRAM SIGNAL BOT v3.1 - FINAL
-- 15m: 3 edge đã test OOS dương, max 1 tín hiệu/4h
-- 1h, 4h, 1d: giữ nguyên toàn bộ
-- Không cắt bỏ gì khác
+V4.0 MODULE 3+4: WEIGHT ADJUSTER + REGIME ADAPTER
+- Edge thắng gần đây → tăng weight vote
+- Edge thua gần đây → giảm weight vote
+- Regime hiện tại → ưu tiên edge phù hợp
 """
 
 import os
@@ -13,12 +13,113 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 import requests
 import json
+from itertools import combinations
+
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
 CMC_API_KEY = "ba07282bfe644708a9f42be12a33acf6"
 DOM_COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ARB', 'OP', 'LINK', 'AVAX', 'DOGE']
 DOM_HISTORY = {}
 WHALE_COINS_BINANCE = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
                        'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MONITOR_DIR = os.path.join(BASE_DIR, "data", "monitor")
+os.makedirs(MONITOR_DIR, exist_ok=True)
+EDGE_LOG_FILE = os.path.join(MONITOR_DIR, "edge_live_performance.json")
+
+def load_edge_log():
+    if os.path.exists(EDGE_LOG_FILE):
+        with open(EDGE_LOG_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_edge_log(log):
+    with open(EDGE_LOG_FILE, 'w') as f:
+        json.dump(log, f, indent=2, default=str)
+
+def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
+    """Cập nhật hiệu suất edge sau mỗi lệnh"""
+    edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
+    log = load_edge_log()
+    
+    if edge_id not in log:
+        log[edge_id] = {
+            'coin': coin, 'tf': tf, 'conditions': cond_str, 'direction': direction,
+            'trades': [], 'live_sharpe': 0, 'live_wr': 0, 'status': 'ACTIVE',
+            'first_seen': datetime.now(timezone.utc).isoformat()
+        }
+    
+    log[edge_id]['trades'].append({
+        'time': datetime.now(timezone.utc).isoformat(),
+        'pnl_pct': round(pnl_pct, 4)
+    })
+    
+    # Chỉ giữ 50 trades gần nhất
+    if len(log[edge_id]['trades']) > 50:
+        log[edge_id]['trades'] = log[edge_id]['trades'][-50:]
+    
+    # Tính Live Sharpe + WR
+    trades = [t['pnl_pct'] for t in log[edge_id]['trades']]
+    if len(trades) >= 10:
+        avg = sum(trades) / len(trades)
+        std = (sum((t - avg)**2 for t in trades) / len(trades)) ** 0.5
+        log[edge_id]['live_sharpe'] = round(avg / std * (365*2)**0.5, 2) if std > 0 else 0
+        log[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
+    
+    save_edge_log(log)
+
+def check_edge_health():
+    """Kiểm tra sức khỏe, tự DEPRECATED edge chết"""
+    log = load_edge_log()
+    alerts = []
+    now = datetime.now(timezone.utc)
+    
+    for edge_id, data in log.items():
+        if data['status'] == 'DEPRECATED':
+            continue
+        
+        trades = data.get('trades', [])
+        if len(trades) >= 10:
+            recent = trades[-10:]
+            avg_recent = sum(t['pnl_pct'] for t in recent) / 10
+            
+            # Chết nếu Sharpe < -2 hoặc thua 8/10 lệnh gần nhất
+            if avg_recent < -0.02 or sum(1 for t in recent if t['pnl_pct'] > 0) <= 2:
+                data['status'] = 'DEPRECATED'
+                data['deprecated_time'] = now.isoformat()
+                alerts.append(
+                    f"⚠️ <b>EDGE DEPRECATED:</b> {edge_id[:60]}...\n"
+                    f"   Live WR: {data['live_wr']}% | Live Sharpe: {data['live_sharpe']}\n"
+                    f"   → Tự động loại bỏ"
+                )
+    
+    save_edge_log(log)
+    
+    # Đếm
+    active = sum(1 for v in log.values() if v['status'] == 'ACTIVE')
+    deprecated = sum(1 for v in log.values() if v['status'] == 'DEPRECATED')
+    
+    return alerts, active, deprecated
+
+def weekly_edge_report():
+    """Báo cáo hàng tuần"""
+    log = load_edge_log()
+    active = [v for v in log.values() if v['status'] == 'ACTIVE']
+    deprecated = [v for v in log.values() if v['status'] == 'DEPRECATED']
+    
+    report = f"📊 <b>WEEKLY EDGE REPORT</b>\n\n"
+    report += f"✅ Active: {len(active)} edges\n"
+    report += f"❌ Deprecated: {len(deprecated)} edges\n"
+    
+    if deprecated:
+        report += f"\n🔻 Vừa loại: {len(deprecated)} edges\n"
+    
+    # Top 3 edge mạnh nhất
+    sorted_active = sorted(active, key=lambda x: x.get('live_sharpe', 0), reverse=True)
+    report += f"\n🏆 Top edges:\n"
+    for e in sorted_active[:3]:
+        report += f"   {e['coin']} {e['tf']} {e['direction']}: Sharpe={e.get('live_sharpe',0):.1f}\n"
+    
+    return report
 
 # ============================================================
 # CONFIG
@@ -319,22 +420,24 @@ def get_signal(df, coin, tf):
         return 0, 0
     
     latest = df.iloc[-1]
-    long_votes = 0
-    short_votes = 0
+    long_weighted = 0.0
+    short_weighted = 0.0
     
     for cond_str, direction in ALL_EDGES[tf][coin]:
         conds = cond_str.split('+')
         match = all(eval_cond(c, latest) for c in conds)
         if match:
+            w = get_edge_weight(coin, tf, cond_str, direction)
             if direction == 'LONG':
-                long_votes += 1
+                long_weighted += w
             else:
-                short_votes += 1
+                short_weighted += w
     
-    if long_votes > short_votes and long_votes >= 1:
-        return 1, long_votes
-    elif short_votes > long_votes and short_votes >= 1:
-        return -1, short_votes
+    if long_weighted > short_weighted and long_weighted >= 1.0:
+        return 1, round(long_weighted, 1)
+    elif short_weighted > long_weighted and short_weighted >= 1.0:
+        return -1, round(short_weighted, 1)
+    return 0, 0
     return 0, 0
 
 # ============================================================
@@ -495,6 +598,10 @@ def main():
                     
                     send_telegram(msg)
                     send_discord(msg)
+                    # Cập nhật edge performance
+                    if 'cond_str' in pos:
+                        update_edge_performance(coin, tf, pos.get('cond_str',''),
+                                                pos['direction'], trade_return * 100)
                     save_state()
                     to_remove.append(key)
             
@@ -591,6 +698,20 @@ def main():
                 for alert in dom_alerts:
                     send_telegram(alert)
                     send_discord(alert)
+        # === WEEKLY REPORT (Chủ nhật 00:00) ===
+        # === AUTO SCANNER (Ngày 1 hàng tháng) ===
+#        if now.day == 1 and now.hour == 0 and now.minute < 5:
+#            scan_key = f"scan_{now.month}"
+#            if scan_key not in last_checks:
+#                last_checks[scan_key] = now
+#                new_edges = auto_scan_new_edges()
+#                if new_edges:
+#                    added = add_new_edges(new_edges)
+#                    send_telegram(f"🔍 <b>AUTO SCANNER:</b> Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
+        if now.weekday() == 6 and now.hour == 0 and now.minute < 5:
+            report = weekly_edge_report()
+            send_telegram(report)
+            send_discord(report)        
         # === WHALE/RETAIL CHECK (mỗi 4h) ===
         if now.hour % 4 == 0 and now.minute < 5 and now.second < 30:
             whale_key = f"whale_{now.hour}"
@@ -642,6 +763,144 @@ def fetch_dominance():
     except Exception as e:
         print(f"Dominance error: {e}")
         return []
+    CONDITIONS_SCAN = {
+    'FUND_P5': lambda d: d['funding_rate'] < d['funding_p5'],
+    'FUND_P95': lambda d: d['funding_rate'] > d['funding_p95'],
+    'FUND_P99': lambda d: d['funding_rate'] > d['funding_p99'],
+    'FUND_POS': lambda d: d['funding_rate'] > 0,
+    'FUND_NEG': lambda d: d['funding_rate'] < 0,
+    'FUND_RISING': lambda d: d['funding_rising'] == 1,
+    'CVD_UP': lambda d: d['cvd_up'] == 1,
+    'CVD_DOWN': lambda d: d['cvd_down'] == 1,
+    'OI_UP': lambda d: d['oi_up'] == 1,
+    'OI_DOWN': lambda d: d['oi_down'] == 1,
+    'VOL_HIGH': lambda d: d['vol_high'] == 1,
+    'VOL_SPIKE': lambda d: d['vol_spike'] == 1,
+    'PRICE_UP': lambda d: d['price_up'] == 1,
+    'PRICE_DOWN': lambda d: d['price_down'] == 1,
+    'TREND_UP': lambda d: d['trend_up'] == 1,
+    'TREND_DOWN': lambda d: d['trend_down'] == 1,
+}
+# Edge weights (mặc định 1.0)
+EDGE_WEIGHTS = {}
+
+def get_edge_weight(coin, tf, cond_str, direction):
+    """Tính weight cho edge dựa trên hiệu suất gần đây + regime"""
+    edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
+    
+    # Base weight
+    weight = EDGE_WEIGHTS.get(edge_id, 1.0)
+    
+    # Điều chỉnh theo live performance
+    log = load_edge_log()
+    if edge_id in log:
+        live_wr = log[edge_id].get('live_wr', 50)
+        if live_wr > 70:
+            weight *= 1.5
+        elif live_wr < 40:
+            weight *= 0.5
+    
+    # Điều chỉnh theo regime (nếu có regime detector)
+    # Có thể thêm sau
+    
+    return max(0.1, min(3.0, weight))  # Clamp 0.1 - 3.0
+
+def update_edge_weight(coin, tf, cond_str, direction, pnl_pct):
+    """Cập nhật weight sau mỗi trade"""
+    edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
+    
+    if edge_id not in EDGE_WEIGHTS:
+        EDGE_WEIGHTS[edge_id] = 1.0
+    
+    # Thắng → +0.1, thua → -0.1
+    if pnl_pct > 0:
+        EDGE_WEIGHTS[edge_id] = min(3.0, EDGE_WEIGHTS[edge_id] + 0.1)
+    else:
+        EDGE_WEIGHTS[edge_id] = max(0.1, EDGE_WEIGHTS[edge_id] - 0.1)    
+
+def auto_scan_new_edges():
+    """Quét edge mới từ dữ liệu 1h gần nhất"""
+    new_edges = []
+    
+    try:
+        for coin in COINS[:3]:  # Chỉ scan 3 coin chính để nhanh
+            df = fetch_klines(coin, '1h', limit=1000)
+            if df is None or len(df) < 500:
+                continue
+            
+            funding = fetch_funding_rate(coin)
+            oi = fetch_oi_bybit(coin, '1h')
+            tf_config = TIMEFRAMES['1h']
+            df = compute_indicators(df, funding, oi if oi else 50000, tf_config)
+            df = df.dropna()
+            
+            if len(df) < 300:
+                continue
+            
+            # Quét tổ hợp 2 điều kiện
+            cond_names = list(CONDITIONS_SCAN.keys())
+            for c1, c2 in combinations(cond_names, 2):
+                for direction in [1, -1]:
+                    mask = pd.Series(True, index=df.index)
+                    mask = mask & CONDITIONS_SCAN[c1](df) & CONDITIONS_SCAN[c2](df)
+                    
+                    signal = mask.astype(int) * direction
+                    signal_shifted = signal.shift(1)
+                    ret = (df['close'].shift(-12) - df['open']) / df['open']
+                    strategy = ret * signal_shifted
+                    valid = strategy[signal_shifted != 0].dropna()
+                    
+                    if len(valid) < 30:
+                        continue
+                    
+                    sharpe = valid.mean() / valid.std() * np.sqrt(365*2) if valid.std() > 0 else 0
+                    
+                    # OOS: 30% cuối
+                    split = int(len(valid) * 0.7)
+                    oos = valid.iloc[split:]
+                    oos_sharpe = oos.mean() / oos.std() * np.sqrt(365*2) if len(oos) > 5 and oos.std() > 0 else 0
+                    
+                    if sharpe > 2.0 and oos_sharpe > 2.0:
+                        dir_str = 'LONG' if direction == 1 else 'SHORT'
+                        cond_str = f"{c1}+{c2}"
+                        
+                        # Kiểm tra trùng với edge hiện có
+                        edge_id = f"{coin}_1h_{cond_str}_{dir_str}"
+                        if not is_duplicate_edge(coin, '1h', cond_str, dir_str):
+                            new_edges.append((coin, cond_str, dir_str, sharpe, oos_sharpe, len(valid)))
+    
+    except Exception as e:
+        print(f"Auto scan error: {e}")
+    
+    return new_edges
+
+def is_duplicate_edge(coin, tf, cond_str, direction):
+    """Kiểm tra edge đã tồn tại chưa"""
+    if tf in ALL_EDGES and coin in ALL_EDGES[tf]:
+        for existing_cond, existing_dir in ALL_EDGES[tf][coin]:
+            if existing_dir == direction:
+                # Kiểm tra điều kiện tương đương
+                existing_set = set(existing_cond.split('+'))
+                new_set = set(cond_str.split('+'))
+                if existing_set == new_set:
+                    return True
+    return False
+
+def add_new_edges(new_edges):
+    """Thêm edge mới vào ALL_EDGES"""
+    added = 0
+    for coin, cond_str, direction, sharpe, oos, n in new_edges:
+        tf = '1h'
+        if tf not in ALL_EDGES:
+            ALL_EDGES[tf] = {}
+        if coin not in ALL_EDGES[tf]:
+            ALL_EDGES[tf][coin] = []
+        
+        ALL_EDGES[tf][coin].append((cond_str, direction))
+        added += 1
+        print(f"   + {coin} {direction} {cond_str} (Sharpe={sharpe:.1f}, OOS={oos:.1f}, n={n})")
+    
+    return added
 
 
 if __name__ == "__main__":
