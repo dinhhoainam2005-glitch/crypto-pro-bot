@@ -41,15 +41,20 @@ def save_edge_log(log):
     with open(EDGE_LOG_FILE, 'w') as f:
         json.dump(log, f, indent=2, default=str)
 def save_weights():
-    with open(WEIGHT_FILE, 'w') as f:
+    tmp = WEIGHT_FILE + '.tmp'
+    with open(tmp, 'w') as f:
         json.dump(EDGE_WEIGHTS, f)
+    os.replace(tmp, WEIGHT_FILE)
 
 def load_weights():
     global EDGE_WEIGHTS
     EDGE_WEIGHTS = {}
     if os.path.exists(WEIGHT_FILE):
-        with open(WEIGHT_FILE, 'r') as f:
-            EDGE_WEIGHTS = json.load(f)
+        try:
+            with open(WEIGHT_FILE, 'r') as f:
+                EDGE_WEIGHTS = json.load(f)
+        except:
+            EDGE_WEIGHTS = {}
 
 def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
     """Cập nhật hiệu suất edge sau mỗi lệnh"""
@@ -881,8 +886,8 @@ def auto_scan_new_edges():
             if df is None or len(df) < 500:
                 continue
             
-            funding = fetch_funding_rate(coin)
-            oi = fetch_oi(coin)
+            funding = fetch_funding_history(coin)
+            oi = fetch_oi_history(coin)
             tf_config = TIMEFRAMES['1h']
             df = compute_indicators(df, funding, oi if oi else 50000, tf_config)
             df = df.dropna()
