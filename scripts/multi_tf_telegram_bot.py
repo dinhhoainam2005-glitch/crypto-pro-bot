@@ -14,6 +14,9 @@ from datetime import datetime, timedelta, timezone
 import requests
 import json
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
+CMC_API_KEY = "ba07282bfe644708a9f42be12a33acf6"
+DOM_COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ARB', 'OP', 'LINK', 'AVAX', 'DOGE']
+DOM_HISTORY = {}
 
 # ============================================================
 # CONFIG
@@ -512,7 +515,7 @@ def main():
                             send_discord(msg)
                             save_state()
                             print(f"   {dir_str} [{tf_name}] {coin}: ${entry_price:,.4f}")
-            
+                                        
             time.sleep(30)
             
         except KeyboardInterrupt:
@@ -523,7 +526,80 @@ def main():
             print(f"⚠️ ERROR: {e}")
             import traceback
             traceback.print_exc()
+            # === DOMINANCE CHECK (mỗi 1h) ===
+        if now.minute < 5 and now.second < 30:  # Đầu mỗi giờ
+            dom_key = f"dom_{now.hour}"
+            if dom_key not in last_checks:
+                last_checks[dom_key] = now
+                dom_alerts = fetch_dominance()
+                for alert in dom_alerts:
+                    send_telegram(alert)
+                    send_discord(alert)
+                    
             time.sleep(30)
+            
+        except KeyboardInterrupt:
+            send_telegram("🛑 Bot đã dừng.")
+            send_discord("🛑 Bot đã dừng.")
+            break
+        except Exception as e:
+            print(f"⚠️ ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # === DOMINANCE CHECK (mỗi 1h) ===
+        if now.minute < 5 and now.second < 30:
+            dom_key = f"dom_{now.hour}"
+            if dom_key not in last_checks:
+                last_checks[dom_key] = now
+                dom_alerts = fetch_dominance()
+                for alert in dom_alerts:
+                    send_telegram(alert)
+                    send_discord(alert)
+        
+        time.sleep(30)
+
+
+def fetch_dominance():
+    headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY, 'Accept': 'application/json'}
+    try:
+        url = "https://pro-api.coinmarketcap.com/v1/global-metrics/quotes/latest"
+        resp = requests.get(url, headers=headers, timeout=10)
+        total_mcap = resp.json()['data']['quote']['USD']['total_market_cap']
+        
+        url2 = f"https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol={','.join(DOM_COINS)}&convert=USD"
+        resp2 = requests.get(url2, headers=headers, timeout=10)
+        data = resp2.json()
+        
+        alerts = []
+        now = datetime.now(timezone.utc)
+        
+        for symbol in DOM_COINS:
+            if symbol not in data['data']:
+                continue
+            mcap = data['data'][symbol]['quote']['USD']['market_cap']
+            dom = mcap / total_mcap * 100
+            price = data['data'][symbol]['quote']['USD']['price']
+            
+            if symbol in DOM_HISTORY:
+                prev = DOM_HISTORY[symbol]
+                hours_diff = (now - prev['time']).total_seconds() / 3600
+                if hours_diff > 0.5:
+                    dom_change = (dom - prev['dominance']) / prev['dominance'] * 100
+                    if abs(dom_change) > 2:
+                        direction = "TANG" if dom_change > 0 else "GIAM"
+                        emoji = "🔵" if dom_change > 0 else "🔴"
+                        alerts.append(
+                            f"{emoji} <b>DOMINANCE: {symbol} {direction} {dom_change:+.1f}%</b>\n"
+                            f"   {prev['dominance']:.3f}% → {dom:.3f}%\n"
+                            f"   Gia: ${price:,.2f}"
+                        )
+            DOM_HISTORY[symbol] = {'dominance': dom, 'price': price, 'time': now}
+        return alerts
+    except Exception as e:
+        print(f"Dominance error: {e}")
+        return []
+
 
 if __name__ == "__main__":
     main()
