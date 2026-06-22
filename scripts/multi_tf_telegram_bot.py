@@ -471,6 +471,29 @@ def can_open_position(coin, tf):
     size = max(0.03, size)
     
     return True, size
+def record_oi():
+    OI_RECORD_DIR = os.path.join(BASE_DIR, "data", "oi_history")
+    os.makedirs(OI_RECORD_DIR, exist_ok=True)
+    for coin in COINS:
+        try:
+            url = f"https://api.bybit.com/v5/market/open-interest?category=linear&symbol={coin}&intervalTime=1h&limit=1"
+            resp = requests.get(url, timeout=5).json()
+            if resp.get('retCode') == 0:
+                oi_list = resp['result']['list']
+                if oi_list:
+                    oi_val = float(oi_list[0]['openInterest'])
+                    ts = pd.to_datetime(oi_list[0]['timestamp'], unit='ms')
+                    file_path = os.path.join(OI_RECORD_DIR, f"{coin}_oi.parquet")
+                    new_row = pd.DataFrame({'oi': [oi_val]}, index=[ts])
+                    if os.path.exists(file_path):
+                        existing = pd.read_parquet(file_path)
+                        existing = pd.concat([existing, new_row])
+                        existing = existing[~existing.index.duplicated(keep='last')]
+                        existing.to_parquet(file_path)
+                    else:
+                        new_row.to_parquet(file_path)
+        except:
+            pass
 def detect_whale_retail():
     """Phát hiện cá voi vs cá con"""
     alerts = []
@@ -718,6 +741,12 @@ def main():
                     added = add_new_edges(new_edges)
                     send_telegram(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
                     send_discord(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, đã thêm {added}")
+        # === OI RECORDER (mỗi 1h) ===
+        if now.minute < 5 and now.second < 30:
+            oi_key = f"oi_record_{now.hour}"
+            if oi_key not in last_checks:
+                last_checks[oi_key] = now
+                record_oi()            
         
         # === WHALE/RETAIL CHECK (mỗi 4h) ===
         if now.hour % 4 == 0 and now.minute < 5 and now.second < 30:
