@@ -798,11 +798,20 @@ def main():
                             }
                             
                             sl_pct = abs(1 - stop_loss/entry_price) * 100
-                            msg = f"{dir_str} <b>⚠️ SIGNAL ENTRY [{tf_name}] {coin}</b>\n\n" \
-                                  f"💰 Entry Price: <b>${entry_price:,.4f}</b>\n" \
-                                  f"🛑 SL Target: ${stop_loss:,.4f} ({sl_pct:.1f}%)\n" \
-                                  f"📏 Size Phân Bổ: {size*100:.1f}% (~${capital*size:,.0f})\n" \
-                                  f"🗳️ Trọng số Vote: {votes}\n"
+                            utc_time = now.strftime('%H:%M')
+                            asia_time = (now + timedelta(hours=8)).strftime('%H:%M')
+                            euro_time = (now + timedelta(hours=2)).strftime('%H:%M')
+                            us_time = (now - timedelta(hours=4)).strftime('%H:%M')
+                            confidence = min(95, 50 + votes * 15)
+                            
+                            msg = f"{dir_str} <b>⚠️ SIGNAL [{tf_name}] {coin}</b>\n\n" \
+                                  f"💰 Entry: <b>${entry_price:,.2f}</b>\n" \
+                                  f"🛑 SL: ${stop_loss:,.2f} ({sl_pct:.1f}%)\n" \
+                                  f"📏 Size: {size*100:.1f}% (~${capital*size:,.0f})\n" \
+                                  f"⏰ Hold: {tf_config['hold_hours']}h\n" \
+                                  f"🗳️ Votes: {votes} | Tin cậy: {confidence:.0f}%\n" \
+                                  f"💼 Vị thế: {len(positions)+1}/{MAX_POSITIONS}\n\n" \
+                                  f"🕐 UTC:{utc_time} | 🌏 Asia:{asia_time} | 🇪🇺 EU:{euro_time} | 🇺🇸 US:{us_time}\n"
                             
                             send_telegram(msg)
                             send_discord(msg)
