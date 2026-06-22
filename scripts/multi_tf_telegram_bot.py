@@ -1,8 +1,9 @@
 """
-V4.0 MODULE 3+4: WEIGHT ADJUSTER + REGIME ADAPTER
-- Edge thắng gần đây → tăng weight vote
-- Edge thua gần đây → giảm weight vote
-- Regime hiện tại → ưu tiên edge phù hợp
+V4.4 MODULE 3+4: WEIGHT ADJUSTER + REGIME ADAPTER (FULL VERSION)
+- Hệ thống Open Interest: Tự động nạp lịch sử từ file Parquet cục bộ để tính toán factor thực tế.
+- Khắc phục lỗi đọc file liên tục: Giữ EDGE_LOG trên RAM, chỉ lưu khi có thay đổi hiệu suất hoặc định kỳ.
+- Tối ưu hóa API & Sleep: Gom gọn luồng lặp chính, tránh trùng lặp fetch dữ liệu.
+- Auto Scanner: Tự động quét tìm Edge mới định kỳ vào ngày 1 hàng tháng (chỉ scan, không tự thêm).
 """
 
 import os
@@ -12,9 +13,11 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 import requests
-session = requests.Session()
 import json
 from itertools import combinations
+import re
+
+session = requests.Session()
 
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
 CMC_API_KEY = "ba07282bfe644708a9f42be12a33acf6"
@@ -27,19 +30,28 @@ MONITOR_DIR = os.path.join(BASE_DIR, "data", "monitor")
 os.makedirs(MONITOR_DIR, exist_ok=True)
 EDGE_LOG_FILE = os.path.join(MONITOR_DIR, "edge_live_performance.json")
 WEIGHT_FILE = os.path.join(MONITOR_DIR, "edge_weights.json")
+OI_RECORD_DIR = os.path.join(BASE_DIR, "data", "oi_history")
+os.makedirs(OI_RECORD_DIR, exist_ok=True)
+
+# Toàn cục lưu RAM cache tránh đọc đĩa liên tục
+GLOBAL_EDGE_LOG = {}
+EDGE_WEIGHTS = {}
 
 def load_edge_log():
+    global GLOBAL_EDGE_LOG
     if os.path.exists(EDGE_LOG_FILE):
         try:
             with open(EDGE_LOG_FILE, 'r') as f:
-                return json.load(f)
+                GLOBAL_EDGE_LOG = json.load(f)
+                return GLOBAL_EDGE_LOG
         except:
-            return {}
-    return {}
+            GLOBAL_EDGE_LOG = {}
+    return GLOBAL_EDGE_LOG
 
-def save_edge_log(log):
+def save_edge_log_to_disk():
     with open(EDGE_LOG_FILE, 'w') as f:
-        json.dump(log, f, indent=2, default=str)
+        json.dump(GLOBAL_EDGE_LOG, f, indent=2, default=str)
+
 def save_weights():
     tmp = WEIGHT_FILE + '.tmp'
     with open(tmp, 'w') as f:
@@ -48,7 +60,6 @@ def save_weights():
 
 def load_weights():
     global EDGE_WEIGHTS
-    EDGE_WEIGHTS = {}
     if os.path.exists(WEIGHT_FILE):
         try:
             with open(WEIGHT_FILE, 'r') as f:
@@ -57,45 +68,40 @@ def load_weights():
             EDGE_WEIGHTS = {}
 
 def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
-    """Cập nhật hiệu suất edge sau mỗi lệnh"""
+    """Cập nhật hiệu suất edge trực tiếp trên RAM cache"""
     edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
-    log = load_edge_log()
     
-    if edge_id not in log:
-        log[edge_id] = {
+    if edge_id not in GLOBAL_EDGE_LOG:
+        GLOBAL_EDGE_LOG[edge_id] = {
             'coin': coin, 'tf': tf, 'conditions': cond_str, 'direction': direction,
             'trades': [], 'live_sharpe': 0, 'live_wr': 0, 'status': 'ACTIVE',
             'first_seen': datetime.now(timezone.utc).isoformat()
         }
     
-    log[edge_id]['trades'].append({
+    GLOBAL_EDGE_LOG[edge_id]['trades'].append({
         'time': datetime.now(timezone.utc).isoformat(),
         'pnl_pct': round(pnl_pct, 4)
     })
     
-    # Chỉ giữ 50 trades gần nhất
-    if len(log[edge_id]['trades']) > 50:
-        log[edge_id]['trades'] = log[edge_id]['trades'][-50:]
+    if len(GLOBAL_EDGE_LOG[edge_id]['trades']) > 50:
+        GLOBAL_EDGE_LOG[edge_id]['trades'] = GLOBAL_EDGE_LOG[edge_id]['trades'][-50:]
     
-    # Tính Live Sharpe + WR
-    trades = [t['pnl_pct'] for t in log[edge_id]['trades']]
+    trades = [t['pnl_pct'] for t in GLOBAL_EDGE_LOG[edge_id]['trades']]
     if len(trades) >= 10:
         avg = sum(trades) / len(trades)
         std = (sum((t - avg)**2 for t in trades) / len(trades)) ** 0.5
-        # Dùng số trade/năm thực tế từ dữ liệu
         trades_count = len(trades)
-        log[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(trades_count), 2) if std > 1e-8 else 0
-        log[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
+        GLOBAL_EDGE_LOG[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(trades_count), 2) if std > 1e-8 else 0
+        GLOBAL_EDGE_LOG[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
     
-    save_edge_log(log)
+    save_edge_log_to_disk()
 
 def check_edge_health():
-    """Kiểm tra sức khỏe, tự DEPRECATED edge chết"""
-    log = load_edge_log()
+    """Kiểm tra sức khỏe hệ thống và lọc các cạnh yếu"""
     alerts = []
     now = datetime.now(timezone.utc)
     
-    for edge_id, data in log.items():
+    for edge_id, data in GLOBAL_EDGE_LOG.items():
         if data['status'] == 'DEPRECATED':
             continue
         
@@ -106,50 +112,45 @@ def check_edge_health():
             win_count = sum(1 for t in recent if t['pnl_pct'] > 0)
             win_rate_recent = win_count / len(recent)
             
-            # Deprecate nếu thắng <30% hoặc lỗ TB >1%
             if win_rate_recent < 0.3 or avg_recent < -0.01:
                 data['status'] = 'DEPRECATED'
-                data['deprecated_time'] = now.isoformat()
+                data['deprecated_at_weekly_cycle'] = now.date().isoformat()
                 alerts.append(
                     f"⚠️ <b>EDGE DEPRECATED:</b> {edge_id[:60]}...\n"
                     f"   Live WR: {data['live_wr']}% | Live Sharpe: {data['live_sharpe']}\n"
                     f"   → Tự động loại bỏ"
                 )
     
-    save_edge_log(log)
-    
-    # Đếm
-    active = sum(1 for v in log.values() if v['status'] == 'ACTIVE')
-    deprecated = sum(1 for v in log.values() if v['status'] == 'DEPRECATED')
-    
+    save_edge_log_to_disk()
+    active = sum(1 for v in GLOBAL_EDGE_LOG.values() if v['status'] == 'ACTIVE')
+    deprecated = sum(1 for v in GLOBAL_EDGE_LOG.values() if v['status'] == 'DEPRECATED')
     return alerts, active, deprecated
 
 def weekly_edge_report():
-    """Báo cáo hàng tuần"""
-    log = load_edge_log()
-    active = [v for v in log.values() if v['status'] == 'ACTIVE']
-    deprecated = [v for v in log.values() if v['status'] == 'DEPRECATED']
+    """Báo cáo hàng tuần - Chỉ đếm số lượng vừa loại trong tuần qua"""
+    active = [v for v in GLOBAL_EDGE_LOG.values() if v['status'] == 'ACTIVE']
+    
+    one_week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+    recent_deprecated = [
+        v for v in GLOBAL_EDGE_LOG.values() 
+        if v['status'] == 'DEPRECATED' and v.get('deprecated_at_weekly_cycle', '') >= one_week_ago
+    ]
     
     report = f"📊 <b>WEEKLY EDGE REPORT</b>\n\n"
-    report += f"✅ Active: {len(active)} edges\n"
-    report += f"❌ Deprecated: {len(deprecated)} edges\n"
+    report += f"✅ Đang hoạt động (Active): {len(active)} edges\n"
+    report += f"❌ Mới loại trong tuần: {len(recent_deprecated)} edges\n"
     
-    if deprecated:
-        report += f"\n🔻 Vừa loại: {len(deprecated)} edges\n"
-    
-    # Top 3 edge mạnh nhất
-    sorted_active = sorted(active, key=lambda x: x.get('live_sharpe', 0), reverse=True)
-    report += f"\n🏆 Top edges:\n"
-    for e in sorted_active[:3]:
-        report += f"   {e['coin']} {e['tf']} {e['direction']}: Sharpe={e.get('live_sharpe',0):.1f}\n"
+    if active:
+        sorted_active = sorted(active, key=lambda x: x.get('live_sharpe', 0), reverse=True)
+        report += f"\n🏆 Top 3 edges mạnh nhất:\n"
+        for e in sorted_active[:3]:
+            report += f"   {e['coin']} {e['tf']} {e['direction']}: Sharpe={e.get('live_sharpe',0):.1f}\n"
     
     return report
 
 # ============================================================
-# CONFIG
+# CONFIG TELEGRAM & STATE
 # ============================================================
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
@@ -167,14 +168,10 @@ if not TOKEN or not CHAT_ID:
                         CHAT_ID = value.strip()
 
 if not TOKEN or not CHAT_ID:
-    print("❌ Thiếu config")
+    print("❌ Thiếu cấu hình token Telegram!")
     sys.exit(1)
 
 CHAT_ID = str(CHAT_ID)
-
-# ============================================================
-# STATE FILE (giữ positions khi restart)
-# ============================================================
 STATE_FILE = os.path.join(BASE_DIR, "data", "state.json")
 
 def save_state():
@@ -216,19 +213,24 @@ def load_state():
                     'cond_str': v.get('cond_str', 'unknown')
                 }
 
-DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1511598618652442655/iIyTS55FJQGg21zgPYeyZz1Utc_pG2jY9tdGNJ66XZVTfNdJDk_NFdUygYrAUoRS6hpY"
 def send_discord(message):
-    """Gửi tin nhắn qua Discord webhook"""
-    # Discord không hỗ trợ HTML, chuyển sang plain text
-    import re
-    clean_msg = re.sub(r'<[^>]+>', '', message)  # Xóa HTML tags
+    clean_msg = re.sub(r'<[^>]+>', '', message)
     payload = {'content': clean_msg}
     try:
         session.post(DISCORD_WEBHOOK, json=payload, timeout=5)
     except:
         pass
+
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {'chat_id': CHAT_ID, 'text': message, 'parse_mode': 'HTML'}
+    try:
+        session.post(url, json=payload, timeout=10)
+    except:
+        pass
+
 # ============================================================
-# TOÀN BỘ CONFIGetch_oi_bybit
+# PARAMS
 # ============================================================
 COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
          'ARBUSDT', 'OPUSDT', 'LINKUSDT', 'AVAXUSDT', 'DOGEUSDT']
@@ -247,29 +249,14 @@ MAX_DD_1 = 0.20
 MAX_DD_2 = 0.30
 MAX_DD_3 = 0.40
 
-# ============================================================
-# STATE
-# ============================================================
 capital = INITIAL_CAPITAL
 peak_capital = INITIAL_CAPITAL
 positions = {}
 last_checks = {}
 last_15m_signal_time = None
-trades_log = []
 
 # ============================================================
-# TELEGRAM
-# ============================================================
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {'chat_id': CHAT_ID, 'text': message, 'parse_mode': 'HTML'}
-    try:
-        session.post(url, json=payload, timeout=10)
-    except:
-        pass
-
-# ============================================================
-# DATA
+# FETCH DATA & OPEN INTEREST SYSTEM
 # ============================================================
 def fetch_klines(symbol, interval='1h', limit=500):
     url = "https://fapi.binance.com/fapi/v1/klines"
@@ -308,20 +295,25 @@ def fetch_funding_history(symbol):
         pass
     return None
 
-def fetch_oi_history(symbol):
-    url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}"
-    try:
-        resp = session.get(url, timeout=5).json()
-        if 'openInterest' in resp:
-            return float(resp['openInterest'])
-    except:
-        pass
-    return None
+def fetch_oi_history_df(symbol, df_index):
+    """Đọc dữ liệu lịch sử OI thực tế được tích lũy từ file Parquet cục bộ"""
+    file_path = os.path.join(OI_RECORD_DIR, f"{symbol}_oi.parquet")
+    default_series = pd.Series(50000.0, index=df_index)
+    if os.path.exists(file_path):
+        try:
+            oi_df = pd.read_parquet(file_path)
+            if not oi_df.empty:
+                oi_df = oi_df.sort_index()
+                merged = pd.merge_asof(pd.DataFrame(index=df_index), oi_df, left_index=True, right_index=True, direction='backward')
+                return merged['oi'].ffill().fillna(50000.0)
+        except Exception as e:
+            print(f"Lỗi nạp file Parquet OI cho {symbol}: {e}")
+    return default_series
 
 # ============================================================
 # INDICATORS
 # ============================================================
-def compute_indicators(df, funding_rate, oi_value, tf_config):
+def compute_indicators(df, funding_rate, oi_series, tf_config):
     df = df.copy()
     n_per_day = {'15m': 96, '1h': 24, '4h': 6, '1d': 1}[tf_config['interval']]
     
@@ -332,10 +324,8 @@ def compute_indicators(df, funding_rate, oi_value, tf_config):
         df['funding_rate'] = df['funding_rate'].ffill()
     else:
         df['funding_rate'] = 0.0001
-    if oi_value is not None:
-        df['oi'] = oi_value
-    else:
-        df['oi'] = 50000
+        
+    df['oi'] = oi_series
     
     fw = max(50, 20 * n_per_day)
     vw = max(50, 20 * n_per_day)
@@ -373,19 +363,16 @@ def compute_indicators(df, funding_rate, oi_value, tf_config):
     df['trend_down'] = (df['close'] < df['ma_50']).astype(int)
     
     df['tr'] = np.maximum(
-    df['high'] - df['low'],
-    np.maximum(
-        abs(df['high'] - df['close'].shift(1)),
-        abs(df['low'] - df['close'].shift(1))
+        df['high'] - df['low'],
+        np.maximum(abs(df['high'] - df['close'].shift(1)), abs(df['low'] - df['close'].shift(1)))
     )
-)
     df['atr_14'] = df['tr'].rolling(14).mean()
     df['atr_pct'] = df['atr_14'] / df['close'] * 100
     
     return df
 
 # ============================================================
-# TOÀN BỘ EDGES (FINAL)
+# STRATEGY EDGES MATCHING & WEIGHTS
 # ============================================================
 ALL_EDGES = {
     '4h': {
@@ -413,7 +400,7 @@ def eval_cond(name, d):
         'CVD_UP': d['cvd_up'] == 1,
         'CVD_DOWN': d['cvd_down'] == 1,
         'VOL_HIGH': d['vol_high'] == 1,
-        'VOL_SPIKE': d['vol_spike'] if 'vol_spike' in d else False,
+        'VOL_SPIKE': d['vol_spike'] == 1 if 'vol_spike' in d else False,
         'PRICE_UP': d['price_up'] == 1,
         'PRICE_DOWN': d['price_down'] == 1,
         'TREND_UP': d['trend_up'] == 1,
@@ -447,6 +434,30 @@ def get_signal(df, coin, tf):
         return -1, round(short_weighted, 1), active_edges
     return 0, 0, []
 
+def get_edge_weight(coin, tf, cond_str, direction):
+    edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
+    weight = EDGE_WEIGHTS.get(edge_id, 1.0)
+    
+    if edge_id in GLOBAL_EDGE_LOG:
+        live_wr = GLOBAL_EDGE_LOG[edge_id].get('live_wr', 50)
+        if live_wr > 70:
+            weight *= 1.5
+        elif live_wr < 40:
+            weight *= 0.5
+            
+    return max(0.1, min(3.0, weight))
+
+def update_edge_weight(coin, tf, cond_str, direction, pnl_pct):
+    edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
+    if edge_id not in EDGE_WEIGHTS:
+        EDGE_WEIGHTS[edge_id] = 1.0
+    
+    alpha = 0.1
+    score = np.clip(1 + pnl_pct / 10, 0.2, 2.0)
+    EDGE_WEIGHTS[edge_id] = 0.9 * EDGE_WEIGHTS[edge_id] + alpha * score
+    EDGE_WEIGHTS[edge_id] = max(0.1, min(3.0, EDGE_WEIGHTS[edge_id]))
+    save_weights()
+
 # ============================================================
 # RISK MANAGEMENT
 # ============================================================
@@ -476,20 +487,97 @@ def can_open_position(coin, tf, votes=1):
         dd_mult = 1.0
     
     size = min(MAX_SIZE_PER_COIN, MAX_TOTAL_SIZE - total_size) * dd_mult
-    # Confidence multiplier: votes 1 → 0.5x, votes 3+ → 1.5x
     conf_mult = min(1.5, max(0.5, votes / 2))
     size *= conf_mult
     size = max(0.03, size)
     
     return True, size
+
+# ============================================================
+# AUTO SCANNER SUBSYSTEM
+# ============================================================
+CONDITIONS_SCAN = {
+    'FUND_POS': lambda d: d['funding_rate'] > 0,
+    'FUND_NEG': lambda d: d['funding_rate'] < 0,
+    'FUND_RISING': lambda d: d['funding_rising'] == 1,
+    'CVD_UP': lambda d: d['cvd_up'] == 1,
+    'CVD_DOWN': lambda d: d['cvd_down'] == 1,
+    'VOL_HIGH': lambda d: d['vol_high'] == 1,
+    'VOL_SPIKE': lambda d: d['vol_spike'] == 1,
+    'PRICE_UP': lambda d: d['price_up'] == 1,
+    'PRICE_DOWN': lambda d: d['price_down'] == 1,
+    'TREND_UP': lambda d: d['trend_up'] == 1,
+    'TREND_DOWN': lambda d: d['trend_down'] == 1,
+}
+
+def is_duplicate_edge(coin, tf, cond_str, direction):
+    if tf in ALL_EDGES and coin in ALL_EDGES[tf]:
+        for existing_cond, existing_dir in ALL_EDGES[tf][coin]:
+            if existing_dir == direction:
+                if set(existing_cond.split('+')) == set(cond_str.split('+')):
+                    return True
+    return False
+
+def add_new_edges(new_edges):
+    added = 0
+    for coin, cond_str, direction, sharpe, oos, n in new_edges:
+        tf = '1h'
+        if tf not in ALL_EDGES: ALL_EDGES[tf] = {}
+        if coin not in ALL_EDGES[tf]: ALL_EDGES[tf][coin] = []
+        ALL_EDGES[tf][coin].append((cond_str, direction))
+        added += 1
+        print(f"   + {coin} {direction} {cond_str} (Sharpe={sharpe:.1f}, OOS={oos:.1f}, n={n})")
+    return added
+
+def auto_scan_new_edges():
+    """Quét các Edge mới dựa trên dữ liệu khung 1h (Ngày 1 hàng tháng)"""
+    new_edges = []
+    try:
+        for coin in COINS[:3]:  # Quét 3 coin chính để tối ưu tốc độ API
+            df = fetch_klines(coin, '1h', limit=1000)
+            if df is None or len(df) < 500: continue
+            
+            funding = fetch_funding_history(coin)
+            oi_series = fetch_oi_history_df(coin, df.index)
+            df = compute_indicators(df, funding, oi_series, {'interval': '1h'})
+            df = df.dropna()
+            
+            if len(df) < 300: continue
+            
+            cond_names = list(CONDITIONS_SCAN.keys())
+            for c1, c2 in combinations(cond_names, 2):
+                for direction in [1, -1]:
+                    mask = pd.Series(True, index=df.index)
+                    mask = mask & CONDITIONS_SCAN[c1](df) & CONDITIONS_SCAN[c2](df)
+                    
+                    signal = mask.astype(int) * direction
+                    signal_shifted = signal.shift(1)
+                    entry_price = df['open'].shift(-1)
+                    exit_price = df['close'].shift(-13)
+                    ret = (exit_price - entry_price) / entry_price
+                    strategy = ret * signal_shifted
+                    valid = strategy[signal_shifted != 0].dropna()
+                    
+                    if len(valid) < 30: continue
+                    
+                    sharpe = valid.mean() / valid.std() * np.sqrt(365*2) if valid.std() > 0 else 0
+                    split = int(len(valid) * 0.7)
+                    oos = valid.iloc[split:]
+                    oos_sharpe = oos.mean() / oos.std() * np.sqrt(365*2) if len(oos) > 5 and oos.std() > 0 else 0
+                    
+                    if sharpe > 2.0 and oos_sharpe > 2.0:
+                        dir_str = 'LONG' if direction == 1 else 'SHORT'
+                        cond_str = f"{c1}+{c2}"
+                        if not is_duplicate_edge(coin, '1h', cond_str, dir_str):
+                            new_edges.append((coin, cond_str, dir_str, sharpe, oos_sharpe, len(valid)))
+    except Exception as e:
+        print(f"Lỗi Auto Scanner: {e}")
+    return new_edges
+
+# ============================================================
+# CRON MONITORS
+# ============================================================
 def record_oi():
-    # Chỉ lưu nếu cách lần cuối > 3500 giây (~1h)
-    if hasattr(record_oi, 'last_time'):
-        if (datetime.now(timezone.utc) - record_oi.last_time).total_seconds() < 3500:
-            return
-    record_oi.last_time = datetime.now(timezone.utc)
-    OI_RECORD_DIR = os.path.join(BASE_DIR, "data", "oi_history")
-    os.makedirs(OI_RECORD_DIR, exist_ok=True)
     for coin in COINS:
         try:
             url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={coin}"
@@ -506,278 +594,36 @@ def record_oi():
                         existing.to_parquet(file_path)
                 else:
                     new_row.to_parquet(file_path)
-        except Exception as e:
-            print(f"OI record error {coin}: {e}")
+        except:
+            pass
+
 def detect_whale_retail():
-    """Phát hiện cá voi vs cá con"""
     alerts = []
-    
     for coin in WHALE_COINS_BINANCE:
         try:
-            # Fetch 1h klines
-            url = f"https://fapi.binance.com/fapi/v1/klines?symbol={coin}&interval=1h&limit=200"
+            url = f"https://fapi.binance.com/fapi/v1/klines?symbol={coin}&interval=1h&limit=25"
             resp = session.get(url, timeout=10)
             df = pd.DataFrame(resp.json(), columns=['t','o','h','l','c','v','x','q','n','tb','tq','i'])
             for col in ['o','h','l','c','v']: df[col] = df[col].astype(float)
             
-            # CVD
             df['cvd'] = (df['v'] * (df['c'] - df['o']) / (df['h'] - df['l'] + 0.01)).cumsum()
             cvd_24h = df['cvd'].iloc[-1] - df['cvd'].iloc[-25] if len(df) >= 25 else 0
             whale_buying = cvd_24h > 0
             
-            
-            # Funding
-            url_fund = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={coin}&limit=50"
+            url_fund = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={coin}&limit=15"
             resp_fund = session.get(url_fund, timeout=5)
-            fund_data = resp_fund.json()
-            fund_rates = [float(x['fundingRate']) for x in fund_data]
+            fund_rates = [float(x['fundingRate']) for x in resp_fund.json()]
             current_fund = fund_rates[-1] if fund_rates else 0
             fund_8h_ago = fund_rates[-9] if len(fund_rates) > 8 else current_fund
             retail_buying = current_fund > 0 and current_fund > fund_8h_ago
             
-            whale_score = (1 if whale_buying else 0)
-            retail_score = 1 if retail_buying else 0
-            
-            if whale_score >= 1 and retail_score == 0:
-                alerts.append(f"🔵 <b>WHALE ALERT: {coin}</b>\n   Cá voi đang GOM (CVD↑), Cá con SỢ (Funding↓)\n   → Khả năng SẮP BƠM")
-            elif whale_score == 0 and retail_score == 1:
-                alerts.append(f"🔴 <b>WHALE ALERT: {coin}</b>\n   Cá voi đang XẢ, Cá con MUA\n   → Khả năng PHÂN PHỐI - SẮP GIẢM")
-        
+            if whale_buying and not retail_buying:
+                alerts.append(f"🔵 <b>WHALE ALERT: {coin}</b>\n   Cá voi GOM (CVD↑), Nhỏ lẻ SỢ (Funding↓)\n   → Khả năng SẮP BƠM")
+            elif not whale_buying and retail_buying:
+                alerts.append(f"🔴 <b>WHALE ALERT: {coin}</b>\n   Cá voi XẢ, Nhỏ lẻ FOMO (Funding↑)\n   → Khả năng SẮP SẬP")
         except:
             pass
-    
     return alerts
-
-# ============================================================
-# MAIN
-# ============================================================
-def main():
-    global capital, peak_capital, positions, last_15m_signal_time
-    load_state()
-    load_weights()
-
-    print("="*60)
-    print("🚀 CRYPTO PRO BOT V4.4 - INSTITUTIONAL")
-    print("="*60)
-    print(f"   7 coins × 2 TFs (4h, 1d) | {sum(len(v) for tf in ALL_EDGES.values() for v in tf.values())} edges walk-forward")
-    print(f"   Max {MAX_POSITIONS} positions | SL 2 ATR | Sharpe OOS 1.49")
-    print("="*60)
-    
-    send_telegram("🚀 <b>Crypto Pro Bot V4.4</b>\n\n"
-              "📊 7 coins × 2 TFs (4h, 1d)\n"
-              "✅ Walk-Forward verified\n"
-              "🛡️ SL 2 ATR · Max 5 pos\n\n"
-              "Đang chờ tín hiệu...")
-    send_discord("🚀 <b>Crypto Pro Bot V4.4</b>\n\n"
-              "📊 7 coins × 2 TFs (4h, 1d)\n"
-              "✅ Walk-Forward verified\n"
-              "🛡️ SL 2 ATR · Max 5 pos\n\n"
-              "Đang chờ tín hiệu...")
-    
-    while True:
-        try:
-            now = datetime.now(timezone.utc)
-            if now.minute % 5 == 0 and now.second < 30:
-                print(f"✅ Bot alive - {now.strftime('%H:%M')} - Positions: {len(positions)}")
-            
-            # === EXIT CHECK ===
-            to_remove = []
-            for key, pos in positions.items():
-                coin = pos['coin']
-                tf = pos['tf']
-                tf_config = TIMEFRAMES[tf]
-                
-                df = fetch_klines(coin, tf_config['interval'], limit=2)
-                if df is None:
-                    continue
-                
-                current_price = df.iloc[-1]['close']
-                hours_held = (now - pos['entry_time']).total_seconds() / 3600
-                
-                if pos['direction'] == 'LONG':
-                    stop_hit = current_price <= pos['stop_loss']
-                else:
-                    stop_hit = current_price >= pos['stop_loss']
-                
-                if stop_hit or hours_held >= tf_config['hold_hours']:
-                    exit_price = pos['stop_loss'] if stop_hit else current_price
-                    
-                    if pos['direction'] == 'LONG':
-                        trade_return = (exit_price - pos['entry_price']) / pos['entry_price']
-                    else:
-                        trade_return = (pos['entry_price'] - exit_price) / pos['entry_price']
-                    
-                    trade_pnl = pos['entry_capital'] * pos['size'] * trade_return
-                    capital += trade_pnl
-                    if capital > peak_capital:
-                        peak_capital = capital
-                    
-                    reason = '🛑 SL' if stop_hit else f'⏰ {tf_config["hold_hours"]}h'
-                    emoji = '🟢' if trade_return > 0 else '🔴'
-                    
-                    msg = f"{emoji} <b>EXIT [{tf}] {coin}</b> ({pos['direction']})\n"
-                    msg += f"Entry: ${pos['entry_price']:,.4f} → Exit: ${exit_price:,.4f}\n"
-                    msg += f"Return: {trade_return*100:+.2f}% | PnL: ${trade_pnl:+,.2f}\n"
-                    msg += f"Reason: {reason}\n"
-                    msg += f"Capital: ${capital:,.0f} ({((capital/INITIAL_CAPITAL)-1)*100:+.2f}%)\n"
-                    msg += f"Positions: {len(positions)-1}/{MAX_POSITIONS}"
-                    
-                    send_telegram(msg)
-                    send_discord(msg)
-                    # Cập nhật edge performance
-                    if 'cond_str' in pos:
-                        edge_list = pos['cond_str'] if isinstance(pos['cond_str'], list) else [pos['cond_str']]
-                        for single_edge in edge_list:
-                            update_edge_performance(coin, tf, single_edge,
-                                                    pos['direction'], trade_return * 100)
-                            update_edge_weight(coin, tf, single_edge,
-                                              pos['direction'], trade_return * 100)
-                    to_remove.append(key)
-            
-            for key in to_remove:
-                del positions[key]
-            if to_remove:
-                save_state()
-            
-            # === SIGNAL CHECK ===
-            for coin in COINS:
-                for tf_name, tf_config in TIMEFRAMES.items():
-                    key = f"{coin}_{tf_name}"
-                    
-                    if key in positions:
-                        continue
-                    
-                    # 15m rate limit
-                    if tf_name == '15m':
-                        if last_15m_signal_time and (now - last_15m_signal_time).total_seconds() < 14400:
-                            continue
-                    
-                    last_key = f"{coin}_{tf_name}_check"
-                    if last_key in last_checks:
-                        if (now - last_checks[last_key]).total_seconds() < 300:
-                            continue
-                    
-                    LIMITS = {'15m': 1500, '1h': 1000, '4h': 1000, '1d': 1000}
-                    limit = LIMITS.get(tf_name, 500)
-                    df = fetch_klines(coin, tf_config['interval'], limit=limit)
-                    if df is None:
-                        continue
-                    
-                    funding = fetch_funding_history(coin)
-                    oi = fetch_oi_history(coin)
-                    df = compute_indicators(df, funding, oi, tf_config)
-                    
-                    signal, votes, active_edges = get_signal(df, coin, tf_name)
-                    last_checks[last_key] = now
-                    
-                    if signal != 0:
-                        can_open, size = can_open_position(coin, tf_name, votes)
-                        
-                        if can_open:
-                            latest = df.iloc[-1]
-                            entry_price = latest['close']
-                            atr_pct = latest['atr_pct']
-                            
-                            if signal == 1:
-                                stop_loss = entry_price * (1 - STOP_LOSS_ATR * atr_pct / 100)
-                                dir_str = 'LONG 🟢'
-                            else:
-                                stop_loss = entry_price * (1 + STOP_LOSS_ATR * atr_pct / 100)
-                                dir_str = 'SHORT 🔴'
-                            
-                            positions[key] = {
-                                'coin': coin, 'tf': tf_name,
-                                'entry_price': entry_price, 'entry_time': now,
-                                'stop_loss': stop_loss, 'size': size,
-                                'direction': 'LONG' if signal == 1 else 'SHORT',
-                                'entry_capital': capital,
-                                'cond_str': active_edges if active_edges else ['unknown'],
-                            }
-                            
-                            if tf_name == '15m':
-                                last_15m_signal_time = now
-                            
-                            sl_pct = abs(1 - stop_loss/entry_price) * 100
-                            
-                            msg = f"{dir_str} <b>[{tf_name}] {coin}</b>\n\n"
-                            msg += f"💰 Entry: <b>${entry_price:,.4f}</b>\n"
-                            msg += f"🛑 SL: ${stop_loss:,.4f} ({sl_pct:.1f}%)\n"
-                            msg += f"📏 Size: {size*100:.1f}% (~${capital*size:,.0f})\n"
-                            msg += f"⏰ Hold: {tf_config['hold_hours']}h\n"
-                            msg += f"🗳️ Votes: {votes}\n"
-                            msg += f"💼 Positions: {len(positions)}/{MAX_POSITIONS}"
-                            
-                            send_telegram(msg)
-                            send_discord(msg)
-                            save_state()
-                            print(f"   {dir_str} [{tf_name}] {coin}: ${entry_price:,.4f}")
-                                        
-            time.sleep(30)
-            
-        except KeyboardInterrupt:
-            send_telegram("🛑 Bot đã dừng.")
-            send_discord("🛑 Bot đã dừng.")
-            break
-        except Exception as e:
-            print(f"⚠️ ERROR: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # === DOMINANCE CHECK (mỗi 1h) ===
-        if now.minute < 5 and now.second < 30:
-            dom_key = f"dom_{now.hour}"
-            if dom_key not in last_checks:
-                last_checks[dom_key] = now
-                dom_alerts = fetch_dominance()
-                for alert in dom_alerts:
-                    send_telegram(alert)
-                    send_discord(alert)
-        
-        # === WEEKLY REPORT (Chủ nhật 00:00) ===
-        if now.weekday() == 6 and now.hour == 0 and now.minute < 5:
-            report_key = f"weekly_{now.date()}"
-            if report_key not in last_checks:
-                last_checks[report_key] = now
-                report = weekly_edge_report()
-                send_telegram(report)
-                send_discord(report)
-        # === EDGE HEALTH CHECK (mỗi ngày 00:00) ===
-        if now.hour == 0 and now.minute < 5:
-            health_key = f"health_{now.date()}"
-            if health_key not in last_checks:
-                last_checks[health_key] = now
-                health_alerts, active, deprecated = check_edge_health()
-                for alert in health_alerts:
-                    send_telegram(alert)
-                    send_discord(alert)
-        
-        # === AUTO SCANNER (Ngày 1 hàng tháng) - CHỈ SCAN, KHÔNG TỰ ĐỘNG THÊM ===
-        if now.day == 1 and now.hour == 0 and now.minute < 5:
-            scan_key = f"scan_{now.month}"
-            if scan_key not in last_checks:
-                last_checks[scan_key] = now
-                new_edges = auto_scan_new_edges()
-                if new_edges:
-                    send_telegram(f"🔍 AUTO SCANNER: Tìm thấy {len(new_edges)} edges mới, chưa thêm (cần duyệt thủ công)")
-                    send_discord(f"🔍 AUTO SCANNER: {len(new_edges)} candidates found")
-        # === OI RECORDER (mỗi 1h) ===
-        if now.minute < 5:
-            oi_key = f"oi_record_{now.hour}"
-            if oi_key not in last_checks:
-                last_checks[oi_key] = now
-                record_oi()
-                print(f"✅ OI recorded at {now.strftime('%H:%M')}")            
-        
-        # === WHALE/RETAIL CHECK (mỗi 4h) ===
-        if now.hour % 4 == 0 and now.minute < 5 and now.second < 30:
-            whale_key = f"whale_{now.hour}"
-            if whale_key not in last_checks:
-                last_checks[whale_key] = now
-                whale_alerts = detect_whale_retail()
-                for alert in whale_alerts:
-                    send_telegram(alert)
-                    send_discord(alert)
-            
 
 def fetch_dominance():
     headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY, 'Accept': 'application/json'}
@@ -806,159 +652,208 @@ def fetch_dominance():
                 if hours_diff > 0.5:
                     dom_change = (dom - prev['dominance']) / prev['dominance'] * 100
                     if abs(dom_change) > 2:
-                        direction = "TANG" if dom_change > 0 else "GIAM"
+                        direction = "TĂNG" if dom_change > 0 else "GIẢM"
                         emoji = "🔵" if dom_change > 0 else "🔴"
                         alerts.append(
                             f"{emoji} <b>DOMINANCE: {symbol} {direction} {dom_change:+.1f}%</b>\n"
                             f"   {prev['dominance']:.3f}% → {dom:.3f}%\n"
-                            f"   Gia: ${price:,.2f}"
+                            f"   Giá: ${price:,.2f}"
                         )
             DOM_HISTORY[symbol] = {'dominance': dom, 'price': price, 'time': now}
         return alerts
-    except Exception as e:
-        print(f"Dominance error: {e}")
+    except:
         return []
-    
-CONDITIONS_SCAN = {
-    'FUND_P5': lambda d: d['funding_rate'] < d['funding_p5'],
-    'FUND_P95': lambda d: d['funding_rate'] > d['funding_p95'],
-    'FUND_P99': lambda d: d['funding_rate'] > d['funding_p99'],
-    'FUND_POS': lambda d: d['funding_rate'] > 0,
-    'FUND_NEG': lambda d: d['funding_rate'] < 0,
-    'FUND_RISING': lambda d: d['funding_rising'] == 1,
-    'CVD_UP': lambda d: d['cvd_up'] == 1,
-    'CVD_DOWN': lambda d: d['cvd_down'] == 1,
-    'VOL_HIGH': lambda d: d['vol_high'] == 1,
-    'VOL_SPIKE': lambda d: d['vol_spike'] == 1,
-    'PRICE_UP': lambda d: d['price_up'] == 1,
-    'PRICE_DOWN': lambda d: d['price_down'] == 1,
-    'TREND_UP': lambda d: d['trend_up'] == 1,
-    'TREND_DOWN': lambda d: d['trend_down'] == 1,
-}
-# Edge weights (mặc định 1.0)
-EDGE_WEIGHTS = {}
 
-def get_edge_weight(coin, tf, cond_str, direction):
-    """Tính weight cho edge dựa trên hiệu suất gần đây + regime"""
-    edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
-    
-    # Base weight
-    weight = EDGE_WEIGHTS.get(edge_id, 1.0)
-    
-    # Điều chỉnh theo live performance
-    log = load_edge_log()
-    if edge_id in log:
-        live_wr = log[edge_id].get('live_wr', 50)
-        if live_wr > 70:
-            weight *= 1.5
-        elif live_wr < 40:
-            weight *= 0.5
-    
-    # Điều chỉnh theo regime (nếu có regime detector)
-    # Có thể thêm sau
-    
-    return max(0.1, min(3.0, weight))  # Clamp 0.1 - 3.0
+# ============================================================
+# BOT ENGINE CORE LOOP
+# ============================================================
+def main():
+    global capital, peak_capital, positions
+    load_state()
+    load_edge_log()
+    load_weights()
 
-def update_edge_weight(coin, tf, cond_str, direction, pnl_pct):
-    edge_id = f"{coin}_{tf}_{cond_str}_{direction}"
-    if edge_id not in EDGE_WEIGHTS:
-        EDGE_WEIGHTS[edge_id] = 1.0
+    print("="*60)
+    print("🚀 CRYPTO PRO BOT V4.4 - REFACTORED LIVE WITH AUTO SCANNER")
+    print("="*60)
     
-    alpha = 0.1
-    # pnl_pct đang là % (vd: 1.0 = 1%)
-    score = np.clip(1 + pnl_pct / 10, 0.2, 2.0)
-    EDGE_WEIGHTS[edge_id] = 0.9 * EDGE_WEIGHTS[edge_id] + alpha * score
-    EDGE_WEIGHTS[edge_id] = max(0.1, min(3.0, EDGE_WEIGHTS[edge_id]))
-    save_weights()    
-
-def auto_scan_new_edges():
-    """Quét edge mới từ dữ liệu 1h gần nhất"""
-    new_edges = []
+    startup_msg = ("🚀 <b>Crypto Pro Bot V4.4 Khởi Động</b>\n\n"
+                   f"📊 Giám sát: {len(COINS)} Coins × TFs (4h, 1d)\n"
+                   f"🛡️ Quản lý rủi ro: SL 2 ATR · Tối đa {MAX_POSITIONS} lệnh đồng thời.\n"
+                   "Hệ thống vận hành ổn định...")
+    send_telegram(startup_msg)
+    send_discord(startup_msg)
     
-    try:
-        for coin in COINS[:3]:  # Chỉ scan 3 coin chính để nhanh
-            df = fetch_klines(coin, '1h', limit=1000)
-            if df is None or len(df) < 500:
-                continue
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            if now.minute % 5 == 0 and now.second < 10:
+                print(f"✅ Bot Alive - {now.strftime('%H:%M')} - Positions Acted: {len(positions)}")
             
-            funding = fetch_funding_history(coin)
-            oi = fetch_oi_history(coin)
-            tf_config = TIMEFRAMES['1h']
-            df = compute_indicators(df, funding, oi if oi else 50000, tf_config)
-            df = df.dropna()
-            
-            if len(df) < 300:
-                continue
-            
-            # Quét tổ hợp 2 điều kiện
-            cond_names = list(CONDITIONS_SCAN.keys())
-            for c1, c2 in combinations(cond_names, 2):
-                for direction in [1, -1]:
-                    mask = pd.Series(True, index=df.index)
-                    mask = mask & CONDITIONS_SCAN[c1](df) & CONDITIONS_SCAN[c2](df)
+            # === 1. KIỂM TRA ĐÓNG LỆNH TRƯỚC (EXIT CHECK) ===
+            to_remove = []
+            for key, pos in positions.items():
+                coin = pos['coin']
+                tf = pos['tf']
+                tf_config = TIMEFRAMES[tf]
+                
+                df = fetch_klines(coin, tf_config['interval'], limit=2)
+                if df is None: continue
+                
+                current_price = df.iloc[-1]['close']
+                hours_held = (now - pos['entry_time']).total_seconds() / 3600
+                
+                stop_hit = (current_price <= pos['stop_loss']) if pos['direction'] == 'LONG' else (current_price >= pos['stop_loss'])
+                time_up = hours_held >= tf_config['hold_hours']
+                
+                if stop_hit or time_up:
+                    exit_price = pos['stop_loss'] if stop_hit else current_price
+                    trade_return = (exit_price - pos['entry_price']) / pos['entry_price'] if pos['direction'] == 'LONG' else (pos['entry_price'] - exit_price) / pos['entry_price']
                     
-                    signal = mask.astype(int) * direction
-                    signal_shifted = signal.shift(1)
-                    # Entry = Open của nến sau tín hiệu
-                    entry_price = df['open'].shift(-1)
-                    # Exit = Close sau 12 nến kể từ entry
-                    exit_price = df['close'].shift(-13)
-                    ret = (exit_price - entry_price) / entry_price
-                    strategy = ret * signal_shifted
-                    valid = strategy[signal_shifted != 0].dropna()
+                    trade_pnl = pos['entry_capital'] * pos['size'] * trade_return
+                    capital += trade_pnl
+                    if capital > peak_capital: peak_capital = capital
                     
-                    if len(valid) < 30:
+                    reason = '🛑 SL Hit' if stop_hit else f'⏰ Time Out {tf_config["hold_hours"]}h'
+                    emoji = '🟢' if trade_return > 0 else '🔴'
+                    
+                    msg = f"{emoji} <b>EXIT [{tf}] {coin}</b> ({pos['direction']})\n" \
+                          f"Entry: ${pos['entry_price']:,.4f} → Exit: ${exit_price:,.4f}\n" \
+                          f"Return: {trade_return*100:+.2f}% | PnL: ${trade_pnl:+,.2f}\n" \
+                          f"Lý do: {reason}\n" \
+                          f"Số dư: ${capital:,.0f}\n"
+                    
+                    send_telegram(msg)
+                    send_discord(msg)
+                    
+                    if 'cond_str' in pos:
+                        edge_list = pos['cond_str'] if isinstance(pos['cond_str'], list) else [pos['cond_str']]
+                        for single_edge in edge_list:
+                            update_edge_performance(coin, tf, single_edge, pos['direction'], trade_return * 100)
+                            update_edge_weight(coin, tf, single_edge, pos['direction'], trade_return * 100)
+                    to_remove.append(key)
+            
+            for key in to_remove: del positions[key]
+            if to_remove: save_state()
+            
+            # === 2. QUÉT TÍN HIỆU VÀO LỆNH (SIGNAL SCANNER) ===
+            for tf_name, tf_config in TIMEFRAMES.items():
+                for coin in COINS:
+                    key = f"{coin}_{tf_name}"
+                    if key in positions: continue
+                    
+                    last_key = f"{coin}_{tf_name}_check"
+                    if last_key in last_checks and (now - last_checks[last_key]).total_seconds() < 290:
                         continue
-                    
-                    sharpe = valid.mean() / valid.std() * np.sqrt(365*2) if valid.std() > 0 else 0
-                    
-                    # OOS: 30% cuối
-                    split = int(len(valid) * 0.7)
-                    oos = valid.iloc[split:]
-                    oos_sharpe = oos.mean() / oos.std() * np.sqrt(365*2) if len(oos) > 5 and oos.std() > 0 else 0
-                    
-                    if sharpe > 2.0 and oos_sharpe > 2.0:
-                        dir_str = 'LONG' if direction == 1 else 'SHORT'
-                        cond_str = f"{c1}+{c2}"
                         
-                        # Kiểm tra trùng với edge hiện có
-                        edge_id = f"{coin}_1h_{cond_str}_{dir_str}"
-                        if not is_duplicate_edge(coin, '1h', cond_str, dir_str):
-                            new_edges.append((coin, cond_str, dir_str, sharpe, oos_sharpe, len(valid)))
-    
-    except Exception as e:
-        print(f"Auto scan error: {e}")
-    
-    return new_edges
+                    df = fetch_klines(coin, tf_config['interval'], limit=500)
+                    if df is None or df.empty: continue
+                    
+                    funding = fetch_funding_history(coin)
+                    oi_series = fetch_oi_history_df(coin, df.index)
+                    df = compute_indicators(df, funding, oi_series, tf_config)
+                    
+                    signal, votes, active_edges = get_signal(df, coin, tf_name)
+                    last_checks[last_key] = now
+                    
+                    if signal != 0:
+                        can_open, size = can_open_position(coin, tf_name, votes)
+                        if can_open:
+                            entry_price = df.iloc[-1]['close']
+                            atr_pct = df.iloc[-1]['atr_pct']
+                            
+                            if signal == 1:
+                                stop_loss = entry_price * (1 - STOP_LOSS_ATR * atr_pct / 100)
+                                dir_str = 'LONG 🟢'
+                            else:
+                                stop_loss = entry_price * (1 + STOP_LOSS_ATR * atr_pct / 100)
+                                dir_str = 'SHORT 🔴'
+                            
+                            positions[key] = {
+                                'coin': coin, 'tf': tf_name,
+                                'entry_price': entry_price, 'entry_time': now,
+                                'stop_loss': stop_loss, 'size': size,
+                                'direction': 'LONG' if signal == 1 else 'SHORT',
+                                'entry_capital': capital,
+                                'cond_str': active_edges if active_edges else ['unknown'],
+                            }
+                            
+                            sl_pct = abs(1 - stop_loss/entry_price) * 100
+                            msg = f"{dir_str} <b>⚠️ SIGNAL ENTRY [{tf_name}] {coin}</b>\n\n" \
+                                  f"💰 Entry Price: <b>${entry_price:,.4f}</b>\n" \
+                                  f"🛑 SL Target: ${stop_loss:,.4f} ({sl_pct:.1f}%)\n" \
+                                  f"📏 Size Phân Bổ: {size*100:.1f}% (~${capital*size:,.0f})\n" \
+                                  f"🗳️ Trọng số Vote: {votes}\n"
+                            
+                            send_telegram(msg)
+                            send_discord(msg)
+                            save_state()
 
-def is_duplicate_edge(coin, tf, cond_str, direction):
-    """Kiểm tra edge đã tồn tại chưa"""
-    if tf in ALL_EDGES and coin in ALL_EDGES[tf]:
-        for existing_cond, existing_dir in ALL_EDGES[tf][coin]:
-            if existing_dir == direction:
-                # Kiểm tra điều kiện tương đương
-                existing_set = set(existing_cond.split('+'))
-                new_set = set(cond_str.split('+'))
-                if existing_set == new_set:
-                    return True
-    return False
+            # === 3. KIỂM TRA ĐỊNH KỲ (CRON JOB CLUSTER) ===
+            if now.second < 10:
+                # Quét OI (Mỗi tiếng)
+                if now.minute == 0:
+                    oi_key = f"oi_cron_{now.hour}"
+                    if oi_key not in last_checks:
+                        last_checks[oi_key] = now
+                        record_oi()
+                
+                # Quét Whale/Retail Flow (Mỗi 4 tiếng)
+                if now.hour % 4 == 0 and now.minute == 5:
+                    whale_key = f"whale_cron_{now.hour}"
+                    if whale_key not in last_checks:
+                        last_checks[whale_key] = now
+                        w_alerts = detect_whale_retail()
+                        for alert in w_alerts:
+                            send_telegram(alert)
+                
+                # Quét Market Dominance (Mỗi tiếng)
+                if now.minute == 10:
+                    dom_key = f"dom_cron_{now.hour}"
+                    if dom_key not in last_checks:
+                        last_checks[dom_key] = now
+                        d_alerts = fetch_dominance()
+                        for alert in d_alerts:
+                            send_telegram(alert)
 
-def add_new_edges(new_edges):
-    """Thêm edge mới vào ALL_EDGES"""
-    added = 0
-    for coin, cond_str, direction, sharpe, oos, n in new_edges:
-        tf = '1h'
-        if tf not in ALL_EDGES:
-            ALL_EDGES[tf] = {}
-        if coin not in ALL_EDGES[tf]:
-            ALL_EDGES[tf][coin] = []
-        
-        ALL_EDGES[tf][coin].append((cond_str, direction))
-        added += 1
-        print(f"   + {coin} {direction} {cond_str} (Sharpe={sharpe:.1f}, OOS={oos:.1f}, n={n})")
-    
-    return added
+                # Kiểm tra Sức Khỏe Edge (Mỗi ngày lúc 00:15)
+                if now.hour == 0 and now.minute == 15:
+                    health_key = f"health_cron_{now.date()}"
+                    if health_key not in last_checks:
+                        last_checks[health_key] = now
+                        h_alerts, _, _ = check_edge_health()
+                        for alert in h_alerts:
+                            send_telegram(alert)
 
+                # Xuất báo cáo hàng tuần (Chủ nhật 00:30)
+                if now.weekday() == 6 and now.hour == 0 and now.minute == 30:
+                    rep_key = f"weekly_rep_{now.date()}"
+                    if rep_key not in last_checks:
+                        last_checks[rep_key] = now
+                        report = weekly_edge_report()
+                        send_telegram(report)
+                        send_discord(report)
+
+                # QUÉT AUTO SCANNER (Ngày 1 hàng tháng lúc 00:45) - CHỈ SCAN, KHÔNG TỰ THÊM
+                if now.day == 1 and now.hour == 0 and now.minute == 45:
+                    scan_key = f"scan_cron_{now.month}"
+                    if scan_key not in last_checks:
+                        last_checks[scan_key] = now
+                        print("🔍 [Cron Job] Đang chạy Auto Scanner định kỳ hàng tháng...")
+                        new_edges_found = auto_scan_new_edges()
+                        if new_edges_found:
+                            msg = f"🔍 <b>AUTO SCANNER REPORT</b>\nTìm thấy {len(new_edges_found)} ứng viên Edge mới tiềm năng (Chưa nạp tự động, cần duyệt thủ công)."
+                            send_telegram(msg)
+                            send_discord(f"🔍 AUTO SCANNER: Found {len(new_edges_found)} candidates.")
+
+            time.sleep(10)
+            
+        except KeyboardInterrupt:
+            print("🛑 Thực thi dừng thủ công từ bàn phím.")
+            break
+        except Exception as e:
+            print(f"⚠️ CORE ERROR: {e}")
+            time.sleep(10)
 
 if __name__ == "__main__":
     main()
