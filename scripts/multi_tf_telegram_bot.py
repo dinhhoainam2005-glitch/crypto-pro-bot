@@ -530,18 +530,18 @@ def main():
     load_state()
 
     print("="*60)
-    print("🚀 MULTI-TF BOT v3.1 - FINAL")
+    print("🚀 CRYPTO PRO BOT V4.0 - VIP PRO")
     print("="*60)
     print(f"   10 coins × 4 TFs | 15m: 3 edge (max 1/4h)")
     print(f"   Max {MAX_POSITIONS} positions | SL 2 ATR")
     print("="*60)
     
-    send_telegram("🚀 <b>Multi-TF Bot v3.1 - FINAL</b>\n\n"
+    send_telegram("🚀 <b>Crypto Pro Bot V4.0 - VIP PRO</b>\n\n"
                   "⏱️ 4 TFs: 15m(3) · 1h · 4h · 1d\n"
                   "🪙 10 Coins\n📊 LONG + SHORT\n"
                   "🛡️ SL 2 ATR · Max 5 pos\n\n"
                   "Đang chờ tín hiệu...")
-    send_discord("🚀 Multi-TF Bot v3.1 - FINAL\n\n"
+    send_discord("🚀 Crypto Pro Bot V4.0 - VIP PRO\n\n"
                   "⏱️ 4 TFs: 15m(3) · 1h · 4h · 1d\n"
                   "🪙 10 Coins\n📊 LONG + SHORT\n"
                   "🛡️ SL 2 ATR · Max 5 pos\n\n"
@@ -772,7 +772,7 @@ def fetch_dominance():
         print(f"Dominance error: {e}")
         return []
     
-    CONDITIONS_SCAN = {
+CONDITIONS_SCAN = {
     'FUND_P5': lambda d: d['funding_rate'] < d['funding_p5'],
     'FUND_P95': lambda d: d['funding_rate'] > d['funding_p95'],
     'FUND_P99': lambda d: d['funding_rate'] > d['funding_p99'],
