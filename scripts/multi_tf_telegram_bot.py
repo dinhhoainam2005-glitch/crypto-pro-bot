@@ -452,6 +452,9 @@ def can_open_position(coin, tf):
         dd_mult = 1.0
     
     size = min(MAX_SIZE_PER_COIN, MAX_TOTAL_SIZE - total_size) * dd_mult
+    # Confidence multiplier: votes 1 → 0.5x, votes 3+ → 1.5x
+    conf_mult = min(1.5, max(0.5, votes / 2))
+    size *= conf_mult
     size = max(0.03, size)
     
     return True, size
@@ -709,6 +712,15 @@ def main():
                 report = weekly_edge_report()
                 send_telegram(report)
                 send_discord(report)
+        # === EDGE HEALTH CHECK (mỗi ngày 00:00) ===
+        if now.hour == 0 and now.minute < 5:
+            health_key = f"health_{now.date()}"
+            if health_key not in last_checks:
+                last_checks[health_key] = now
+                health_alerts, active, deprecated = check_edge_health()
+                for alert in health_alerts:
+                    send_telegram(alert)
+                    send_discord(alert)
         
         # === AUTO SCANNER (Ngày 1 hàng tháng) - CHỈ SCAN, KHÔNG TỰ ĐỘNG THÊM ===
         if now.day == 1 and now.hour == 0 and now.minute < 5:
