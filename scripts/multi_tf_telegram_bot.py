@@ -538,27 +538,6 @@ def main():
                     
             time.sleep(30)
             
-        except KeyboardInterrupt:
-            send_telegram("🛑 Bot đã dừng.")
-            send_discord("🛑 Bot đã dừng.")
-            break
-        except Exception as e:
-            print(f"⚠️ ERROR: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # === DOMINANCE CHECK (mỗi 1h) ===
-        if now.minute < 5 and now.second < 30:
-            dom_key = f"dom_{now.hour}"
-            if dom_key not in last_checks:
-                last_checks[dom_key] = now
-                dom_alerts = fetch_dominance()
-                for alert in dom_alerts:
-                    send_telegram(alert)
-                    send_discord(alert)
-        
-        time.sleep(30)
-
 
 def fetch_dominance():
     headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY, 'Accept': 'application/json'}
