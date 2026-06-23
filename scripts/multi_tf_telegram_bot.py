@@ -307,31 +307,52 @@ def fetch_funding_history(symbol):
     return None
 
 def fetch_oi_history_df(symbol, df_index):
-    file_path = os.path.join(OI_RECORD_DIR, f"{symbol}_oi.parquet")
     if df_index.tz is not None:
         df_index = df_index.tz_localize(None)
-        
-    default_series = pd.Series(50000.0, index=df_index)
-    if os.path.exists(file_path):
+    df_index = df_index.astype('datetime64[us]')
+    
+    # Tìm tất cả file OI daily
+    import glob
+    pattern = os.path.join(OI_RECORD_DIR, f"{symbol}_*_oi.parquet")
+    files = sorted(glob.glob(pattern))
+    
+    if files:
         try:
-            oi_df = pd.read_parquet(file_path)
-            if not oi_df.empty:
-                if oi_df.index.tz is not None:
-                    oi_df.index = oi_df.index.tz_localize(None)
-                oi_df = oi_df.sort_index()
-
-                df_index = df_index.astype('datetime64[us]')
+            oi_parts = []
+            for f in files:
+                part = pd.read_parquet(f)
+                if not part.empty:
+                    if part.index.tz is not None:
+                        part.index = part.index.tz_localize(None)
+                    oi_parts.append(part)
+            if oi_parts:
+                oi_df = pd.concat(oi_parts).sort_index()
+                oi_df = oi_df[~oi_df.index.duplicated(keep='last')]
                 merged = pd.merge_asof(
-                    pd.DataFrame(index=df_index), 
-                    oi_df, 
-                    left_index=True, 
-                    right_index=True, 
-                    direction='backward'
+                    pd.DataFrame(index=df_index), oi_df,
+                    left_index=True, right_index=True, direction='backward'
                 )
                 return merged['oi'].ffill().fillna(50000.0)
         except Exception as e:
-            print(f"Lỗi nạp file Parquet OI cho {symbol}: {e}")
-    return default_series
+            print(f"Lỗi nạp OI cho {symbol}: {e}")
+    
+    # Fallback: thử file cũ
+    old_file = os.path.join(OI_RECORD_DIR, f"{symbol}_oi.parquet")
+    if os.path.exists(old_file):
+        try:
+            oi_df = pd.read_parquet(old_file).sort_index()
+            if not oi_df.empty:
+                if oi_df.index.tz is not None:
+                    oi_df.index = oi_df.index.tz_localize(None)
+                merged = pd.merge_asof(
+                    pd.DataFrame(index=df_index), oi_df,
+                    left_index=True, right_index=True, direction='backward'
+                )
+                return merged['oi'].ffill().fillna(50000.0)
+        except:
+            pass
+    
+    return pd.Series(50000.0, index=df_index)
 
 # ============================================================
 # INDICATORS
@@ -408,22 +429,27 @@ ALL_EDGES = {
         'SOLUSDT': [('FUND_NEG+TREND_UP', 'SHORT'), ('PRICE_UP+OI_DOWN', 'SHORT')],
     },
     '1h': {
-        'BTCUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG'), ('VOL_SPIKE+PRICE_UP', 'LONG')],
-        'ETHUSDT': [('CVD_UP+VOL_SPIKE', 'LONG'), ('VOL_SPIKE+PRICE_UP', 'LONG')],
+        'ARBUSDT': [('CVD_DOWN+PRICE_UP', 'SHORT')],
+        'BTCUSDT': [('FUND_NEG+VOL_HIGH', 'LONG'), ('FUND_NEG+PRICE_DOWN', 'LONG'), ('VOL_SPIKE+PRICE_UP', 'LONG')],
+        'ETHUSDT': [('CVD_UP+VOL_SPIKE', 'LONG'), ('VOL_HIGH+PRICE_UP', 'LONG'), ('VOL_SPIKE+PRICE_UP', 'LONG')],
+        'SOLUSDT': [('VOL_SPIKE+OI_DOWN', 'LONG')],
     },
     '4h': {
         'ARBUSDT': [('VOL_HIGH+PRICE_DOWN', 'LONG')],
-        'AVAXUSDT': [('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG')],
-        'BTCUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG')],
-        'DOGEUSDT': [('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG')],
+        'AVAXUSDT': [('FUND_POS+VOL_SPIKE', 'LONG'), ('FUND_NEG+VOL_HIGH', 'LONG'), ('FUND_RISING+VOL_HIGH', 'LONG'), ('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG'), ('VOL_HIGH+TREND_DOWN', 'LONG')],
+        'BNBUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG')],
+        'BTCUSDT': [('FUND_NEG+CVD_DOWN', 'LONG'), ('FUND_NEG+VOL_HIGH', 'LONG'), ('FUND_NEG+PRICE_DOWN', 'LONG')],
+        'DOGEUSDT': [('FUND_NEG+VOL_HIGH', 'LONG'), ('FUND_NEG+PRICE_UP', 'SHORT'), ('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG'), ('VOL_HIGH+TREND_DOWN', 'LONG'), ('VOL_HIGH+OI_DOWN', 'LONG')],
         'ETHUSDT': [('CVD_UP+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_UP', 'LONG'), ('VOL_HIGH+TREND_UP', 'LONG'), ('VOL_HIGH+OI_DOWN', 'LONG')],
+        'LINKUSDT': [('FUND_NEG+VOL_HIGH', 'LONG'), ('FUND_RISING+VOL_HIGH', 'LONG'), ('CVD_DOWN+VOL_HIGH', 'LONG'), ('VOL_HIGH+PRICE_DOWN', 'LONG'), ('VOL_HIGH+TREND_DOWN', 'LONG')],
     },
     '1d': {
-        'ARBUSDT': [('FUND_NEG+OI_DOWN', 'SHORT'), ('FUND_RISING+CVD_UP', 'SHORT'), ('FUND_RISING+PRICE_UP', 'SHORT')],
-        'BNBUSDT': [('FUND_NEG+PRICE_DOWN', 'LONG'), ('PRICE_DOWN+TREND_UP', 'LONG')],
-        'BTCUSDT': [('FUND_NEG+CVD_DOWN', 'LONG')],
+        'ARBUSDT': [('FUND_RISING+CVD_UP', 'SHORT'), ('FUND_RISING+PRICE_UP', 'SHORT'), ('FUND_RISING+TREND_DOWN', 'SHORT'), ('FUND_RISING+OI_DOWN', 'SHORT'), ('CVD_UP+TREND_DOWN', 'SHORT'), ('CVD_UP+OI_DOWN', 'SHORT'), ('PRICE_DOWN+OI_UP', 'SHORT')],
+        'BNBUSDT': [('FUND_POS+TREND_UP', 'LONG'), ('FUND_NEG+PRICE_DOWN', 'LONG'), ('PRICE_DOWN+TREND_UP', 'LONG')],
+        'BTCUSDT': [('FUND_NEG+CVD_DOWN', 'LONG'), ('PRICE_DOWN+TREND_UP', 'LONG')],
         'ETHUSDT': [('PRICE_DOWN+TREND_UP', 'LONG')],
-        'LINKUSDT': [('FUND_POS+VOL_HIGH', 'LONG'), ('FUND_NEG+PRICE_DOWN', 'LONG'), ('VOL_HIGH+TREND_UP', 'LONG')],
+        'LINKUSDT': [('FUND_POS+VOL_HIGH', 'LONG'), ('FUND_NEG+CVD_DOWN', 'LONG')],
+        'XRPUSDT': [('FUND_NEG+PRICE_UP', 'SHORT')],
     },
 }
 
