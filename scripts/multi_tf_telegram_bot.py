@@ -778,15 +778,25 @@ def main():
             # === 2. QUÉT TÍN HIỆU VÀO LỆNH (SIGNAL SCANNER) ===
             for tf_name, tf_config in TIMEFRAMES.items():
                 interval_minutes = {'15m': 15, '1h': 60, '4h': 240, '1d': 1440}[tf_name]
-                if now.minute % interval_minutes != 0 or now.second > 15:
+                
+                # Tính mốc thời gian sàn (Floor time) gần nhất của nến
+                # Ví dụ: 10:23 khung 15m sẽ được tính về mốc 10:15
+                delta_minutes = (now.minute % interval_minutes)
+                candle_time = now - timedelta(minutes=delta_minutes, seconds=now.second, microseconds=now.microsecond)
+                candle_str = candle_time.strftime('%Y%m%d_%H%M')
+                
+                # CHỈ QUÉT TRONG VÒNG 5 PHÚT ĐẦU TIÊN KHI NẾN MỚI MỞ
+                # Tránh trường hợp tắt bot đi bật lại ở giữa khung giờ lại quét lại tín hiệu cũ
+                if (now - candle_time).total_seconds() > 300:
                     continue
                     
                 for coin in COINS:
                     key = f"{coin}_{tf_name}"
                     if key in positions: continue
                     
-                    last_key = f"{coin}_{tf_name}_check"
-                    if last_key in last_checks and (now - last_checks[last_key]).total_seconds() < 290:
+                    # Chống trùng tuyệt đối dựa trên mốc nến chính xác, không sợ lệch giây/lệch phút
+                    current_candle_id = f"{key}_{candle_str}"
+                    if current_candle_id in last_checks:
                         continue
                         
                     df = fetch_klines(coin, tf_config['interval'], limit=500)
@@ -797,7 +807,7 @@ def main():
                     df = compute_indicators(df, funding, oi_series, tf_config)
                     
                     signal, votes, active_edges = get_signal(df, coin, tf_name)
-                    last_checks[last_key] = now
+                    last_checks[current_candle_id] = now  # Đánh dấu đã quét xong nến này
                     
                     if signal != 0:
                         can_open, size = can_open_position(coin, tf_name, votes)
@@ -812,6 +822,7 @@ def main():
                                 stop_loss = entry_price * (1 + STOP_LOSS_ATR * atr_pct / 100)
                                 dir_str = 'SHORT 🔴'
                             
+                            # Lưu vị thế giả lập để theo dõi hiệu suất
                             positions[key] = {
                                 'coin': coin, 'tf': tf_name,
                                 'entry_price': entry_price, 'entry_time': now,
@@ -824,18 +835,16 @@ def main():
                             sl_pct = abs(1 - stop_loss/entry_price) * 100
                             utc_time = now.strftime('%H:%M')
                             asia_time = (now + timedelta(hours=8)).strftime('%H:%M')
-                            euro_time = (now + timedelta(hours=2)).strftime('%H:%M')
-                            us_time = (now - timedelta(hours=4)).strftime('%H:%M')
                             confidence = min(95, 50 + votes * 15)
                             
                             msg = f"{dir_str} <b>⚠️ SIGNAL [{tf_name}] {coin}</b>\n\n" \
-                                  f"💰 Entry: <b>${entry_price:,.2f}</b>\n" \
-                                  f"🛑 SL: ${stop_loss:,.2f} ({sl_pct:.1f}%)\n" \
-                                  f"📏 Size: {size*100:.1f}% (~${capital*size:,.0f})\n" \
-                                  f"⏰ Hold: {tf_config['hold_hours']}h\n" \
+                                  f"💰 Entry gợi ý: <b>${entry_price:,.4f}</b>\n" \
+                                  f"🛑 SL: ${stop_loss:,.4f} ({sl_pct:.1f}%)\n" \
+                                  f"📏 Size khuyến nghị: {size*100:.1f}%\n" \
+                                  f"⏰ Hold tối đa: {tf_config['hold_hours']}h\n" \
                                   f"🗳️ Votes: {votes} | Tin cậy: {confidence:.0f}%\n" \
-                                  f"💼 Vị thế: {len(positions)+1}/{MAX_POSITIONS}\n\n" \
-                                  f"🕐 UTC:{utc_time} | 🌏 Asia:{asia_time} | 🇪🇺 EU:{euro_time} | 🇺🇸 US:{us_time}\n"
+                                  f"💼 Vị thế giả lập hiện tại: {len(positions)}/{MAX_POSITIONS}\n\n" \
+                                  f"🌏 Giờ Asia: {asia_time} (UTC: {utc_time})\n"
                             
                             send_telegram(msg)
                             send_discord(msg)
