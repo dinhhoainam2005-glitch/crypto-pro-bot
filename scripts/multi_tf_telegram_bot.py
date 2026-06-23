@@ -767,9 +767,13 @@ def main():
                     
                     if 'cond_str' in pos:
                         edge_list = pos['cond_str'] if isinstance(pos['cond_str'], list) else [pos['cond_str']]
+                        # Chia đều PnL cho từng edge
+                        pnl_per_edge = (trade_return * 100) / len(edge_list) if edge_list else 0
                         for single_edge in edge_list:
-                            update_edge_performance(coin, tf, single_edge, pos['direction'], trade_return * 100)
-                            update_edge_weight(coin, tf, single_edge, pos['direction'], trade_return * 100)
+                            update_edge_performance(coin, tf, single_edge,
+                                                    pos['direction'], pnl_per_edge)
+                            update_edge_weight(coin, tf, single_edge,
+                                              pos['direction'], pnl_per_edge)
                     to_remove.append(key)
             
             for key in to_remove: del positions[key]
