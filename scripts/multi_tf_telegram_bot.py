@@ -16,6 +16,8 @@ import requests
 import json
 from itertools import combinations
 import re
+import threading
+file_lock = threading.Lock()
 
 session = requests.Session()
 
@@ -49,14 +51,16 @@ def load_edge_log():
     return GLOBAL_EDGE_LOG
 
 def save_edge_log_to_disk():
-    with open(EDGE_LOG_FILE, 'w') as f:
-        json.dump(GLOBAL_EDGE_LOG, f, indent=2, default=str)
+    with file_lock:
+        with open(EDGE_LOG_FILE, 'w') as f:
+            json.dump(GLOBAL_EDGE_LOG, f, indent=2, default=str)
 
 def save_weights():
-    tmp = WEIGHT_FILE + '.tmp'
-    with open(tmp, 'w') as f:
-        json.dump(EDGE_WEIGHTS, f)
-    os.replace(tmp, WEIGHT_FILE)
+    with file_lock:
+        tmp = WEIGHT_FILE + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(EDGE_WEIGHTS, f)
+        os.replace(tmp, WEIGHT_FILE)
 
 def load_weights():
     global EDGE_WEIGHTS
@@ -86,13 +90,17 @@ def update_edge_performance(coin, tf, cond_str, direction, pnl_pct):
     if len(GLOBAL_EDGE_LOG[edge_id]['trades']) > 50:
         GLOBAL_EDGE_LOG[edge_id]['trades'] = GLOBAL_EDGE_LOG[edge_id]['trades'][-50:]
     
-    trades = [t['pnl_pct'] for t in GLOBAL_EDGE_LOG[edge_id]['trades']]
-    if len(trades) >= 10:
-        avg = sum(trades) / len(trades)
-        std = (sum((t - avg)**2 for t in trades) / len(trades)) ** 0.5
-        trades_count = len(trades)
-        GLOBAL_EDGE_LOG[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(trades_count), 2) if std > 1e-8 else 0
-        GLOBAL_EDGE_LOG[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
+    try:
+        trades = [t['pnl_pct'] for t in GLOBAL_EDGE_LOG[edge_id]['trades']]
+        if len(trades) >= 10:
+            avg = sum(trades) / len(trades)
+            std = (sum((t - avg)**2 for t in trades) / len(trades)) ** 0.5
+            trades_count = len(trades)
+            GLOBAL_EDGE_LOG[edge_id]['live_sharpe'] = round(avg / std * np.sqrt(trades_count), 2) if std > 1e-8 else 0
+            GLOBAL_EDGE_LOG[edge_id]['live_wr'] = round(sum(1 for t in trades if t > 0) / len(trades) * 100, 1)
+    except:
+        GLOBAL_EDGE_LOG[edge_id]['live_sharpe'] = 0
+        GLOBAL_EDGE_LOG[edge_id]['live_wr'] = 50
     
     save_edge_log_to_disk()
 
@@ -175,24 +183,25 @@ CHAT_ID = str(CHAT_ID)
 STATE_FILE = os.path.join(BASE_DIR, "data", "state.json")
 
 def save_state():
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    temp_file = STATE_FILE + '.tmp'
-    with open(temp_file, 'w') as f:
-        json.dump({
-            'capital': capital,
-            'peak_capital': peak_capital,
-            'positions': {k: {
-                'coin': v['coin'], 'tf': v['tf'],
-                'entry_price': v['entry_price'],
-                'entry_time': v['entry_time'].isoformat(),
-                'stop_loss': v['stop_loss'],
-                'size': v['size'],
-                'direction': v['direction'],
-                'entry_capital': v['entry_capital'],
-                'cond_str': v.get('cond_str', 'unknown')
-            } for k, v in positions.items()}
-        }, f)
-    os.replace(temp_file, STATE_FILE)
+    with file_lock:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        temp_file = STATE_FILE + '.tmp'
+        with open(temp_file, 'w') as f:
+            json.dump({
+                'capital': capital,
+                'peak_capital': peak_capital,
+                'positions': {k: {
+                    'coin': v['coin'], 'tf': v['tf'],
+                    'entry_price': v['entry_price'],
+                    'entry_time': v['entry_time'].isoformat(),
+                    'stop_loss': v['stop_loss'],
+                    'size': v['size'],
+                    'direction': v['direction'],
+                    'entry_capital': v['entry_capital'],
+                    'cond_str': v.get('cond_str', 'unknown')
+                } for k, v in positions.items()}
+            }, f, indent=2)
+        os.replace(temp_file, STATE_FILE)
 
 def load_state():
     global capital, peak_capital, positions
@@ -298,16 +307,27 @@ def fetch_funding_history(symbol):
     return None
 
 def fetch_oi_history_df(symbol, df_index):
-    """Đọc dữ liệu lịch sử OI thực tế được tích lũy từ file Parquet cục bộ"""
     file_path = os.path.join(OI_RECORD_DIR, f"{symbol}_oi.parquet")
+    if df_index.tz is not None:
+        df_index = df_index.tz_localize(None)
+        
     default_series = pd.Series(50000.0, index=df_index)
     if os.path.exists(file_path):
         try:
             oi_df = pd.read_parquet(file_path)
             if not oi_df.empty:
+                if oi_df.index.tz is not None:
+                    oi_df.index = oi_df.index.tz_localize(None)
                 oi_df = oi_df.sort_index()
+
                 df_index = df_index.astype('datetime64[us]')
-                merged = pd.merge_asof(pd.DataFrame(index=df_index), oi_df, left_index=True, right_index=True, direction='backward')
+                merged = pd.merge_asof(
+                    pd.DataFrame(index=df_index), 
+                    oi_df, 
+                    left_index=True, 
+                    right_index=True, 
+                    direction='backward'
+                )
                 return merged['oi'].ffill().fillna(50000.0)
         except Exception as e:
             print(f"Lỗi nạp file Parquet OI cho {symbol}: {e}")
@@ -577,7 +597,7 @@ def auto_scan_new_edges():
                     
                     if len(valid) < 30: continue
                     
-                    sharpe = valid.mean() / valid.std() * np.sqrt(365*2) if valid.std() > 0 else 0
+                    sharpe = valid.mean() / valid.std() * np.sqrt(365*24)  # 1h = 8760 bars/năm
                     split = int(len(valid) * 0.7)
                     oos = valid.iloc[split:]
                     oos_sharpe = oos.mean() / oos.std() * np.sqrt(365*2) if len(oos) > 5 and oos.std() > 0 else 0
@@ -757,6 +777,10 @@ def main():
             
             # === 2. QUÉT TÍN HIỆU VÀO LỆNH (SIGNAL SCANNER) ===
             for tf_name, tf_config in TIMEFRAMES.items():
+                interval_minutes = {'15m': 15, '1h': 60, '4h': 240, '1d': 1440}[tf_name]
+                if now.minute % interval_minutes != 0 or now.second > 15:
+                    continue
+                    
                 for coin in COINS:
                     key = f"{coin}_{tf_name}"
                     if key in positions: continue
