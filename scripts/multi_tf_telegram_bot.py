@@ -477,10 +477,12 @@ def get_edge_weight(coin, tf, cond_str, direction):
     
     if edge_id in GLOBAL_EDGE_LOG:
         live_wr = GLOBAL_EDGE_LOG[edge_id].get('live_wr', 50)
-        if live_wr > 70:
-            weight *= 1.5
-        elif live_wr < 40:
-            weight *= 0.5
+        trades_count = len(GLOBAL_EDGE_LOG[edge_id].get('trades', []))
+        if trades_count >= 100:  # Chỉ điều chỉnh khi đủ 100 trades
+            if live_wr > 70:
+                weight *= 1.5
+            elif live_wr < 40:
+                weight *= 0.5
             
     return max(0.1, min(3.0, weight))
 
@@ -597,7 +599,9 @@ def auto_scan_new_edges():
                     
                     if len(valid) < 30: continue
                     
-                    sharpe = valid.mean() / valid.std() * np.sqrt(365*24)  # 1h = 8760 bars/năm
+                    # Annualization thực tế: số trade/năm ≈ 365*24/horizon
+                    trades_per_year = 365 * 24 / 12  # ~730 cho 1h hold 12h
+                    sharpe = valid.mean() / valid.std() * np.sqrt(trades_per_year)
                     split = int(len(valid) * 0.7)
                     oos = valid.iloc[split:]
                     oos_sharpe = oos.mean() / oos.std() * np.sqrt(365*2) if len(oos) > 5 and oos.std() > 0 else 0
@@ -622,7 +626,9 @@ def record_oi():
             if 'openInterest' in resp:
                 oi_val = float(resp['openInterest'])
                 ts = datetime.now(timezone.utc)
-                file_path = os.path.join(OI_RECORD_DIR, f"{coin}_oi.parquet")
+                # Ghi theo ngày: BTCUSDT_2026_06_23.parquet
+                daily_file = f"{coin}_{ts.strftime('%Y_%m_%d')}_oi.parquet"
+                file_path = os.path.join(OI_RECORD_DIR, daily_file)
                 new_row = pd.DataFrame({'oi': [oi_val]}, index=[ts])
                 if os.path.exists(file_path):
                     existing = pd.read_parquet(file_path)
